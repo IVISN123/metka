@@ -33,8 +33,13 @@ const NAMES: Record<Lang, Record<string, string>> = {
   en: { text: 'Text', image: 'Photo', icon: 'Icon', shape: 'Shape', barcode: 'Barcode', qr: 'QR', datetime: 'Date', line: 'Line' },
 }
 
+function fabricType(obj: FabricObject) {
+  return (obj.type || '').toLowerCase()
+}
+
 function isText(obj: FabricObject): obj is Textbox {
-  return obj.type === 'Textbox' || obj.type === 'IText' || obj.type === 'Text'
+  const type = fabricType(obj)
+  return type === 'textbox' || type === 'itext' || type === 'text'
 }
 
 function typingTarget(target: EventTarget | null) {
@@ -529,7 +534,7 @@ export class EditorEngine {
     if (patch.strokeWidth !== undefined) obj.set('strokeWidth', patch.strokeWidth)
     if (patch.angle !== undefined) obj.set('angle', patch.angle)
     if (patch.opacity !== undefined) obj.set('opacity', patch.opacity)
-    if (patch.rx !== undefined && obj.type === 'Rect') obj.set({ rx: patch.rx, ry: patch.rx })
+    if (patch.rx !== undefined && fabricType(obj) === 'rect') obj.set({ rx: patch.rx, ry: patch.rx })
     if (isText(obj)) {
       if (patch.fontFamily !== undefined) obj.set('fontFamily', patch.fontFamily)
       if (patch.fontSize !== undefined) obj.set('fontSize', patch.fontSize)
@@ -564,7 +569,7 @@ export class EditorEngine {
     if (patch.showText !== undefined) meta.showText = patch.showText
     if (patch.ecl !== undefined) meta.ecl = patch.ecl
     writeMeta(obj, meta)
-    if (meta.kind === 'image' && obj.type === 'Image') this.applyFilters(obj as FabricImage, meta)
+    if (meta.kind === 'image' && fabricType(obj) === 'image') this.applyFilters(obj as FabricImage, meta)
     if (meta.kind === 'barcode' && (patch.value !== undefined || patch.symbology !== undefined || patch.showText !== undefined)) {
       await this.replaceRaster(obj, barcodeDataUrl(meta.value || '0', meta.symbology || 'CODE128', meta.showText !== false))
     }
@@ -587,7 +592,7 @@ export class EditorEngine {
   }
 
   private async replaceRaster(obj: FabricObject, src: string) {
-    if (obj.type !== 'Image') return
+    if (fabricType(obj) !== 'image') return
     const image = obj as FabricImage
     const next = await FabricImage.fromURL(src)
     const scaleX = image.scaleX ?? 1
@@ -1174,7 +1179,7 @@ function describe(obj: FabricObject): SelectedInfo {
     dateFormat: meta?.dateFormat,
     live: meta?.live,
     vertical: meta?.vertical,
-    rx: obj.type === 'Rect' ? ((obj as Rect).rx ?? 0) : undefined,
+    rx: fabricType(obj) === 'rect' ? ((obj as Rect).rx ?? 0) : undefined,
   }
   if (isText(obj)) {
     info.text = meta?.vertical ? (meta.sourceText ?? '') : (obj.text ?? '')

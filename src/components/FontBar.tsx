@@ -9,7 +9,7 @@ export function FontBar() {
   const state = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot)
   const fonts = useSyncExternalStore(subscribeFonts, fontChoices, fontChoices)
   const selected = state.selected
-  if (!selected || (selected.kind !== 'text' && selected.kind !== 'datetime') || selected.text === undefined) return null
+  if (!selected || (selected.kind !== 'text' && selected.kind !== 'datetime')) return null
   const known = fonts.some((font) => font.family === selected.fontFamily)
   return (
     <div className="pointer-events-auto absolute inset-x-3 top-3 z-30 mx-auto flex max-w-xl flex-col gap-2 rounded-2xl border-2 border-[var(--border)] bg-[var(--card)] p-3 shadow-xl">

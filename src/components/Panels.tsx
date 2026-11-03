@@ -191,18 +191,10 @@ export function Inspector() {
             <Field label={t('name')}>
               <TextInput value={selected.name} onChange={(event) => void engine.updateSelected({ name: event.target.value })} />
             </Field>
-            {selected.text !== undefined && (
+            {(selected.kind === 'text' || selected.kind === 'datetime' || selected.text !== undefined) && (
               <>
-                <Field label={t('text')}>
-                  <textarea
-                    value={selected.text}
-                    onChange={(event) => void engine.updateSelected({ text: event.target.value })}
-                    rows={3}
-                    className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2 text-[15px] outline-none focus:border-[var(--accent)]"
-                  />
-                </Field>
                 <Field label={t('font')}>
-                  <SelectInput value={selected.fontFamily} onChange={(event) => void engine.updateSelected({ fontFamily: event.target.value })}>
+                  <SelectInput value={selected.fontFamily ?? ''} onChange={(event) => void engine.updateSelected({ fontFamily: event.target.value })}>
                     {fonts.map((font) => (
                       <option key={font.id} value={font.family} style={{ fontFamily: font.family }}>
                         {font.label}
@@ -242,6 +234,14 @@ export function Inspector() {
                     )}
                   </div>
                   <span className="mt-1 block text-xs text-[var(--muted)]">{t('fontHint')}</span>
+                </Field>
+                <Field label={t('text')}>
+                  <textarea
+                    value={selected.text ?? ''}
+                    onChange={(event) => void engine.updateSelected({ text: event.target.value })}
+                    rows={3}
+                    className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2 text-[15px] outline-none focus:border-[var(--accent)]"
+                  />
                 </Field>
                 <Field label={t('fontSize')}>
                   <Slider min={8} max={160} value={selected.fontSize ?? 16} onChange={(value) => void engine.updateSelected({ fontSize: value })} />
