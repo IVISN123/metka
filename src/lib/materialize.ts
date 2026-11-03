@@ -1,5 +1,6 @@
 import type { LabelDocument, Meta } from '../types'
 import { barcodeDataUrl, qrDataUrl } from './codes'
+import { formatPageLabel } from './pages'
 import { fillTemplate, formatDate, verticalize } from './units'
 
 type JsonObject = Record<string, unknown>
@@ -33,6 +34,7 @@ export async function materialize(
   doc: LabelDocument,
   row?: Record<string, string>,
   now = new Date(),
+  pageNumber?: number,
 ): Promise<LabelDocument> {
   const clone = structuredClone(doc)
   const canvas = clone.canvas
@@ -43,6 +45,9 @@ export async function materialize(
     if (meta.kind === 'text') {
       const raw = fillTemplate(meta.sourceText ?? String(obj.text ?? ''), row)
       obj.text = meta.vertical ? verticalize(raw) : raw
+    } else if (meta.kind === 'number') {
+      const n = pageNumber ?? doc.pageFrom ?? 1
+      obj.text = formatPageLabel(n, meta.prefix ?? '', meta.suffix ?? '', meta.pad ?? 0)
     } else if (meta.kind === 'datetime') {
       const formatted = meta.live === false ? (meta.sourceText ?? formatDate(meta.dateFormat ?? 'DD.MM.YYYY', now)) : formatDate(meta.dateFormat ?? 'DD.MM.YYYY', now)
       const raw = fillTemplate(formatted, row)

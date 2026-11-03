@@ -15,6 +15,7 @@ import {
   Clock,
   Eye,
   EyeOff,
+  Hash,
   Image as ImageIcon,
   Italic,
   Lock,
@@ -49,6 +50,7 @@ const KIND_ICON: Record<ObjectKind, typeof Type> = {
   barcode: Barcode,
   qr: QrCode,
   datetime: Clock,
+  number: Hash,
   paper: Square,
 }
 
@@ -59,6 +61,7 @@ export function ToolPanel() {
   const [shapesOpen, setShapesOpen] = useState(false)
   const tools: { key: I18nKey; icon: typeof Type; run: () => void }[] = [
     { key: 'text', icon: Type, run: () => engine.addText() },
+    { key: 'pageNumber', icon: Hash, run: () => engine.addNumber() },
     { key: 'photo', icon: ImageIcon, run: () => fileRef.current?.click() },
     { key: 'icons', icon: Sparkles, run: () => setIconsOpen((open) => !open) },
     { key: 'shapes', icon: Square, run: () => setShapesOpen((open) => !open) },
@@ -191,7 +194,7 @@ export function Inspector() {
             <Field label={t('name')}>
               <TextInput value={selected.name} onChange={(event) => void engine.updateSelected({ name: event.target.value })} />
             </Field>
-            {(selected.kind === 'text' || selected.kind === 'datetime' || selected.text !== undefined) && (
+            {(selected.kind === 'text' || selected.kind === 'datetime' || selected.kind === 'number') && (
               <>
                 <Field label={t('font')}>
                   <SelectInput value={selected.fontFamily ?? ''} onChange={(event) => void engine.updateSelected({ fontFamily: event.target.value })}>
@@ -235,14 +238,28 @@ export function Inspector() {
                   </div>
                   <span className="mt-1 block text-xs text-[var(--muted)]">{t('fontHint')}</span>
                 </Field>
-                <Field label={t('text')}>
-                  <textarea
-                    value={selected.text ?? ''}
-                    onChange={(event) => void engine.updateSelected({ text: event.target.value })}
-                    rows={3}
-                    className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2 text-[15px] outline-none focus:border-[var(--accent)]"
-                  />
-                </Field>
+                {selected.kind === 'number' ? (
+                  <div className="grid grid-cols-3 gap-2">
+                    <Field label={t('prefix')}>
+                      <TextInput value={selected.prefix ?? ''} onChange={(event) => void engine.updateSelected({ prefix: event.target.value })} />
+                    </Field>
+                    <Field label={t('numberSuffix')}>
+                      <TextInput value={selected.suffix ?? ''} onChange={(event) => void engine.updateSelected({ suffix: event.target.value })} />
+                    </Field>
+                    <Field label={t('pad')}>
+                      <TextInput type="number" min={0} max={6} value={selected.pad ?? 0} onChange={(event) => void engine.updateSelected({ pad: Number(event.target.value) })} />
+                    </Field>
+                  </div>
+                ) : (
+                  <Field label={t('text')}>
+                    <textarea
+                      value={selected.text ?? ''}
+                      onChange={(event) => void engine.updateSelected({ text: event.target.value })}
+                      rows={3}
+                      className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2 text-[15px] outline-none focus:border-[var(--accent)]"
+                    />
+                  </Field>
+                )}
                 <Field label={t('fontSize')}>
                   <Slider min={8} max={160} value={selected.fontSize ?? 16} onChange={(value) => void engine.updateSelected({ fontSize: value })} />
                 </Field>
@@ -256,9 +273,11 @@ export function Inspector() {
                   <Toggle on={!!selected.underline} label={t('underline')} onClick={() => void engine.updateSelected({ underline: !selected.underline })}>
                     <Underline size={16} />
                   </Toggle>
-                  <Toggle on={!!selected.vertical} label={t('vertical')} onClick={() => void engine.updateSelected({ vertical: !selected.vertical })}>
-                    <span className="text-xs font-bold">Ab</span>
-                  </Toggle>
+                  {selected.kind !== 'number' && (
+                    <Toggle on={!!selected.vertical} label={t('vertical')} onClick={() => void engine.updateSelected({ vertical: !selected.vertical })}>
+                      <span className="text-xs font-bold">Ab</span>
+                    </Toggle>
+                  )}
                 </div>
                 <div className="flex gap-1">
                   {(['left', 'center', 'right'] as const).map((align) => (

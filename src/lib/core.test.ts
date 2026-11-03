@@ -3,6 +3,7 @@ import { ImageEncoder, PageColorType, PrintError } from '@mmote/niimbluelib'
 import { parseImport, serializeTemplates } from './bundle'
 import { parseCsv, seriesValues } from './csv'
 import { ditherLuma, sharpenLuma, sharpnessCut } from './dither'
+import { collatedPages, formatPageLabel, parsePageRange } from './pages'
 import { formatPacketLine, rfidFromClient } from './diag'
 import { formatPrintError } from './print-errors'
 import { metaFor, resolvePrintTask, suggestedTask } from './presets'
@@ -105,6 +106,16 @@ describe('template files', () => {
     const design = parseImport(JSON.stringify(doc()))
     expect(design.type).toBe('design')
     expect(() => parseImport('{')).toThrow()
+  })
+})
+
+describe('page numbers', () => {
+  it('collates copies on each page and pads the label', () => {
+    expect(formatPageLabel(2, '№ ', '', 3)).toBe('№ 002')
+    expect(collatedPages(2, 5, 2)).toEqual([2, 2, 3, 3, 4, 4, 5, 5])
+    expect(parsePageRange(2, 5)).toEqual({ from: 2, to: 5 })
+    expect(parsePageRange(5, 2)).toEqual({ error: 'range' })
+    expect(parsePageRange(0, 1)).toEqual({ error: 'range' })
   })
 })
 

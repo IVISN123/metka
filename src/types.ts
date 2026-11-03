@@ -5,7 +5,7 @@ export type AlignMode = 'start' | 'center' | 'end'
 export type DitherMode = 'threshold' | 'floyd' | 'atkinson'
 export type DitherChoice = 'inherit' | DitherMode
 export type Sharpness = 'off' | 'clear' | 'strong'
-export type ObjectKind = 'text' | 'image' | 'icon' | 'shape' | 'barcode' | 'qr' | 'datetime' | 'paper'
+export type ObjectKind = 'text' | 'image' | 'icon' | 'shape' | 'barcode' | 'qr' | 'datetime' | 'number' | 'paper'
 
 export type PreviewSettings = {
   mode: DitherMode
@@ -31,6 +31,9 @@ export type Meta = {
   dateFormat?: string
   live?: boolean
   iconId?: string
+  prefix?: string
+  suffix?: string
+  pad?: number
 }
 
 export type LabelDocument = {
@@ -47,6 +50,8 @@ export type LabelDocument = {
   align: AlignMode
   task: string
   taskAuto: boolean
+  pageFrom?: number
+  pageTo?: number
   preview: PreviewSettings
   canvas: Record<string, unknown>
 }
@@ -104,6 +109,9 @@ export type SelectedInfo = {
   dateFormat?: string
   live?: boolean
   rx?: number
+  prefix?: string
+  suffix?: string
+  pad?: number
 }
 
 export type EditorState = {
@@ -122,6 +130,8 @@ export type EditorState = {
   align: AlignMode
   task: string
   taskAuto: boolean
+  pageFrom: number
+  pageTo: number
   preview: PreviewSettings
   zoom: number
   canUndo: boolean
@@ -167,6 +177,8 @@ export type PrinterSnapshot = {
   printing: boolean
   progress: number
   progressLabel: string
+  progressPage: number
+  progressTotal: number
 }
 
 export const emptyRfid = (): RfidView => ({
@@ -196,6 +208,8 @@ export const initialEditorState = (): EditorState => ({
   align: 'center',
   task: 'D110',
   taskAuto: true,
+  pageFrom: 1,
+  pageTo: 1,
   preview: { mode: 'floyd', threshold: 168, invert: false, sharpness: 'off' },
   zoom: 1,
   canUndo: false,

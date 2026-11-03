@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useSyncExternalStore } from 'react'
 import { engine } from '../engine/editor'
 import { applySeriesValue } from '../lib/materialize'
+import { collatedPages, documentHasPageNumber, parsePageRange } from '../lib/pages'
 import { formatPrintError } from '../lib/print-errors'
 import { LABEL_TYPES, metaFor, resolvePrintTask, suggestedTask, taskNames } from '../lib/presets'
 import { renderDocumentThermal } from '../lib/render'
@@ -33,6 +34,12 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
   const [fwProgress, setFwProgress] = useState('')
   const pageW = mmToPx(state.widthMm, state.dpi)
   const pageH = mmToPx(state.heightMm, state.dpi)
+  const hasNumber = state.layers.some((layer) => layer.kind === 'number')
+  const range = hasNumber ? parsePageRange(state.pageFrom, state.pageTo) : { from: 1, to: 1 }
+  const rangeError = hasNumber && 'error' in range
+  const sequence = hasNumber && !('error' in range) ? collatedPages(range.from, range.to, state.quantity) : []
+  const batchCount = batch?.rows.length ?? 1
+  const labelCount = hasNumber ? sequence.length * batchCount : Math.max(1, state.quantity) * batchCount
   const guessed = suggestedTask(state.model).guessed
   const effectiveTask = resolvePrintTask({
     taskAuto: state.taskAuto,
@@ -66,10 +73,32 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
       const doc = engine.toDocument()
       const now = new Date()
       const jobs = batch?.rows.length ? batch.rows : [null]
+      const numbered = documentHasPageNumber(doc)
       const pages = []
-      for (const row of jobs) {
-        const next = batch?.targetId && row?.value ? applySeriesValue(doc, batch.targetId, row.value) : doc
-        pages.push(await renderDocumentThermal(next, row ?? undefined, now))
+      let quantity = doc.quantity
+      if (numbered) {
+        const parsed = parsePageRange(doc.pageFrom ?? 1, doc.pageTo ?? 1)
+        if ('error' in parsed) {
+          toast(t('pageRangeBad'))
+          return
+        }
+        const numbers = collatedPages(parsed.from, parsed.to, doc.quantity)
+        if (numbers.length * jobs.length > 999) {
+          toast(t('pageRangeBad'))
+          return
+        }
+        for (const row of jobs) {
+          const base = batch?.targetId && row?.value ? applySeriesValue(doc, batch.targetId, row.value) : doc
+          for (const number of numbers) {
+            pages.push(await renderDocumentThermal(base, row ?? undefined, now, number))
+          }
+        }
+        quantity = 1
+      } else {
+        for (const row of jobs) {
+          const next = batch?.targetId && row?.value ? applySeriesValue(doc, batch.targetId, row.value) : doc
+          pages.push(await renderDocumentThermal(next, row ?? undefined, now))
+        }
       }
       const live = printer.getSnapshot()
       const head = live.printhead ?? metaFor(live.model || doc.model)?.printheadPixels
@@ -79,7 +108,7 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
         printhead: head,
         align: doc.align,
         density: doc.density,
-        quantity: doc.quantity,
+        quantity,
         labelType: doc.labelType,
         task: doc.task,
         taskAuto: doc.taskAuto,
@@ -250,6 +279,28 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
           <Field label={t('copies')}>
             <TextInput type="number" min={1} max={200} value={state.quantity} onChange={(event) => engine.setQuantity(Number(event.target.value))} />
           </Field>
+          {hasNumber && (
+            <>
+              <Field label={t('pageFrom')}>
+                <TextInput
+                  type="number"
+                  min={1}
+                  max={999}
+                  value={state.pageFrom}
+                  onChange={(event) => engine.setPageRange(Number(event.target.value), state.pageTo)}
+                />
+              </Field>
+              <Field label={t('pageTo')}>
+                <TextInput
+                  type="number"
+                  min={1}
+                  max={999}
+                  value={state.pageTo}
+                  onChange={(event) => engine.setPageRange(state.pageFrom, Number(event.target.value))}
+                />
+              </Field>
+            </>
+          )}
           <Field label={t('labelType')}>
             <SelectInput value={state.labelType} onChange={(event) => engine.setLabelType(Number(event.target.value))}>
               {LABEL_TYPES.map((item) => (
@@ -297,13 +348,22 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
         {link.printing && (
           <div>
             <div className="mb-1 text-xs text-[var(--muted)]">
-              {t('printing')} {link.progressLabel}
+              {link.progressTotal > 0 ? t('printIndex', { n: link.progressPage, total: link.progressTotal }) : t('printing')}
             </div>
             <div className="h-1.5 overflow-hidden rounded-full bg-[var(--hover)]">
               <div className="h-full bg-[var(--accent)]" style={{ width: `${Math.max(4, link.progress)}%` }} />
             </div>
           </div>
         )}
+        <p className="text-sm font-bold" data-testid="label-count">
+          {t('willPrint', { n: labelCount })}
+        </p>
+        {hasNumber && !rangeError && (
+          <p className="text-xs leading-5 text-[var(--muted)]" data-testid="page-order">
+            {t('pageOrder', { list: sequence.slice(0, 24).join(', ') + (sequence.length > 24 ? '…' : '') })}
+          </p>
+        )}
+        {rangeError && <p className="text-xs leading-5 text-[var(--danger)]">{t('pageRangeBad')}</p>}
         <p className="text-xs leading-5 text-[var(--muted)]">
           {t('printPlan', {
             task: effectiveTask,
@@ -363,7 +423,7 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
             </Button>
           </div>
         )}
-        <Button variant="primary" disabled={link.printing || !state.ready} onClick={() => void send()}>
+        <Button variant="primary" disabled={link.printing || !state.ready || rangeError} onClick={() => void send()}>
           {t('sendPrint')}
         </Button>
       </div>

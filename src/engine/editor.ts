@@ -21,6 +21,7 @@ import { buildBuiltin } from './builtins'
 import { readMeta, writeMeta } from './meta'
 import { barcodeDataUrl, qrDataUrl } from '../lib/codes'
 import { iconById } from '../lib/icons'
+import { formatPageLabel, parsePageRange } from '../lib/pages'
 import { metaFor, suggestedTask } from '../lib/presets'
 import { ensureFontsReady } from '../lib/fonts'
 import { readAutosave } from '../lib/storage'
@@ -29,8 +30,8 @@ import { clamp, formatDate, mmToPx, uid, verticalize } from '../lib/units'
 type GuideSet = { vertical: number[]; horizontal: number[] }
 
 const NAMES: Record<Lang, Record<string, string>> = {
-  ru: { text: 'Текст', image: 'Фото', icon: 'Иконка', shape: 'Фигура', barcode: 'Штрихкод', qr: 'QR', datetime: 'Дата', line: 'Линия' },
-  en: { text: 'Text', image: 'Photo', icon: 'Icon', shape: 'Shape', barcode: 'Barcode', qr: 'QR', datetime: 'Date', line: 'Line' },
+  ru: { text: 'Текст', image: 'Фото', icon: 'Иконка', shape: 'Фигура', barcode: 'Штрихкод', qr: 'QR', datetime: 'Дата', line: 'Линия', number: 'Номер' },
+  en: { text: 'Text', image: 'Photo', icon: 'Icon', shape: 'Shape', barcode: 'Barcode', qr: 'QR', datetime: 'Date', line: 'Line', number: 'Number' },
 }
 
 function fabricType(obj: FabricObject) {
@@ -267,6 +268,8 @@ export class EditorEngine {
       align: state.align,
       task: state.task,
       taskAuto: state.taskAuto,
+      pageFrom: state.pageFrom,
+      pageTo: state.pageTo,
       preview: state.preview,
       canvas: this.canvas.toObject(['data']) as Record<string, unknown>,
     }
@@ -299,6 +302,8 @@ export class EditorEngine {
       align: doc.align,
       task: doc.task,
       taskAuto: doc.taskAuto,
+      pageFrom: doc.pageFrom ?? 1,
+      pageTo: doc.pageTo ?? 1,
       preview: doc.preview,
       dirty,
     })
@@ -390,6 +395,40 @@ export class EditorEngine {
       data: { id: uid(), kind: 'text', name: this.named('text'), sourceText: text, vertical: false },
     })
     this.place(box)
+  }
+
+  addNumber() {
+    const center = this.viewCenter()
+    const text = formatPageLabel(this.snapshot.pageFrom)
+    const box = new Textbox(text, {
+      originX: 'center',
+      originY: 'center',
+      left: center.x,
+      top: center.y,
+      width: Math.min(this.pxW * 0.45, 140),
+      fontSize: Math.max(16, Math.round(this.pxH * 0.45)),
+      fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
+      fill: '#000000',
+      textAlign: 'center',
+      data: { id: uid(), kind: 'number', name: this.named('number'), prefix: '', suffix: '', pad: 0 },
+    })
+    this.place(box)
+  }
+
+  setPageRange(from: number, to: number) {
+    if (!Number.isFinite(from) || !Number.isFinite(to)) return
+    const nextFrom = Math.round(from)
+    const nextTo = Math.round(to)
+    this.commit({ pageFrom: nextFrom, pageTo: nextTo })
+    const parsed = parsePageRange(nextFrom, nextTo)
+    if ('error' in parsed) return
+    for (const obj of this.userObjects()) {
+      const meta = readMeta(obj)
+      if (!meta || meta.kind !== 'number' || !isText(obj)) continue
+      obj.set('text', formatPageLabel(parsed.from, meta.prefix ?? '', meta.suffix ?? '', meta.pad ?? 0))
+    }
+    this.canvas?.requestRenderAll()
+    this.pushHistory()
   }
 
   async addImageFile(file: File) {
@@ -542,9 +581,17 @@ export class EditorEngine {
       if (patch.fontStyle !== undefined) obj.set('fontStyle', patch.fontStyle)
       if (patch.underline !== undefined) obj.set('underline', patch.underline)
       if (patch.textAlign !== undefined) obj.set('textAlign', patch.textAlign)
-      if (patch.text !== undefined) {
+      if (patch.text !== undefined && meta.kind !== 'number') {
         meta.sourceText = patch.text
         obj.set('text', meta.vertical ? verticalize(patch.text) : patch.text)
+      }
+      if (meta.kind === 'number') {
+        if (patch.prefix !== undefined) meta.prefix = patch.prefix
+        if (patch.suffix !== undefined) meta.suffix = patch.suffix
+        if (patch.pad !== undefined) meta.pad = Math.max(0, Math.min(6, Math.round(patch.pad) || 0))
+        if (patch.prefix !== undefined || patch.suffix !== undefined || patch.pad !== undefined) {
+          obj.set('text', formatPageLabel(this.snapshot.pageFrom, meta.prefix ?? '', meta.suffix ?? '', meta.pad ?? 0))
+        }
       }
       if (patch.vertical !== undefined) {
         meta.vertical = patch.vertical
@@ -941,6 +988,8 @@ export class EditorEngine {
       align: doc.align,
       task: doc.task,
       taskAuto: doc.taskAuto,
+      pageFrom: doc.pageFrom ?? 1,
+      pageTo: doc.pageTo ?? 1,
       preview: doc.preview,
       canUndo: this.histIndex > 0,
       canRedo: this.histIndex < this.history.length - 1,
@@ -1179,6 +1228,9 @@ function describe(obj: FabricObject): SelectedInfo {
     dateFormat: meta?.dateFormat,
     live: meta?.live,
     vertical: meta?.vertical,
+    prefix: meta?.prefix,
+    suffix: meta?.suffix,
+    pad: meta?.pad,
     rx: fabricType(obj) === 'rect' ? ((obj as Rect).rx ?? 0) : undefined,
   }
   if (isText(obj)) {

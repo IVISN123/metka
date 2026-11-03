@@ -46,6 +46,8 @@ const initial = (): PrinterSnapshot => ({
   printing: false,
   progress: 0,
   progressLabel: '',
+  progressPage: 0,
+  progressTotal: 0,
 })
 
 export class PrinterController {
@@ -139,7 +141,9 @@ export class PrinterController {
       const progress = Math.round((event.pagePrintProgress + event.pageFeedProgress) / 2)
       this.patch({
         progress,
-        progressLabel: `${event.page}/${event.pagesTotal}`,
+        progressPage: event.page,
+        progressTotal: event.pagesTotal,
+        progressLabel: `${event.page} из ${event.pagesTotal}`,
       })
     })
     client.on('printpacketprogress', (event) => {
@@ -246,7 +250,17 @@ export class PrinterController {
     let failure: unknown
     try {
       await task.printInit()
-      for (const page of job.pages) {
+      for (let index = 0; index < job.pages.length; index += 1) {
+        const page = job.pages[index]
+        if (!page) continue
+        const shown = index * quantity + 1
+        const total = job.pages.length * quantity
+        this.patch({
+          progressPage: shown,
+          progressTotal: total,
+          progressLabel: `${shown} из ${total}`,
+          progress: Math.round((index / job.pages.length) * 100),
+        })
         const { canvas } = padCanvas(page, job.direction, printhead, job.align)
         const encoded = ImageEncoder.encodeCanvas(canvas, PageColorType.SingleColor, job.direction)
         await task.printPage(encoded, quantity)

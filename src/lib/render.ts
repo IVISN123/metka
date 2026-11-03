@@ -38,9 +38,9 @@ export async function renderDocumentColor(doc: LabelDocument): Promise<HTMLCanva
   }
 }
 
-export async function renderDocumentThermal(doc: LabelDocument, row?: Record<string, string>, now = new Date()) {
+export async function renderDocumentThermal(doc: LabelDocument, row?: Record<string, string>, now = new Date(), pageNumber?: number) {
   await ensureFontsReady()
-  const prepared = await materialize(doc, row, now)
+  const prepared = await materialize(doc, row, now, pageNumber)
   const width = mmToPx(prepared.widthMm, prepared.dpi)
   const height = mmToPx(prepared.heightMm, prepared.dpi)
   const canvas = await loadScene(prepared, width, height, '#ffffff')
