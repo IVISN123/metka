@@ -255,7 +255,7 @@ const ru = {
   removeFont: 'Удалить шрифт',
   fontTooBig: 'Шрифт больше 4 МБ',
   fontFail: 'Этот файл не открылся как шрифт',
-  fontEach: 'У каждого текстового блока свой шрифт. ГОСТ A и ГОСТ B уже в списке.',
+  fontEach: 'У каждого текстового блока свой шрифт. IBM Plex Mono и JetBrains Mono уже в списке.',
   firmwareFlash: 'Прошивка',
   flashLead: 'Загрузка файла .bin в D11_H по Bluetooth. Чужой файл или другая мажорная версия убивает принтер.',
   flashWarn:
@@ -527,7 +527,7 @@ const en: { [K in keyof typeof ru]: string } = {
   removeFont: 'Remove font',
   fontTooBig: 'Font is larger than 4 MB',
   fontFail: 'This file did not open as a font',
-  fontEach: 'Each text box has its own font. GOST A and GOST B are already in the list.',
+  fontEach: 'Each text box has its own font. IBM Plex Mono and JetBrains Mono are already in the list.',
   firmwareFlash: 'Firmware',
   flashLead: 'Send a .bin to a D11_H over Bluetooth. The wrong file or a different major version kills the printer.',
   flashWarn:

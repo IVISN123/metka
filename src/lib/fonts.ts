@@ -40,8 +40,8 @@ async function register(font: StoredFont) {
 export async function ensureFontsReady() {
   if (typeof document === 'undefined' || !document.fonts) return
   try {
-    await document.fonts.load('16px "OpenGOST type A"')
-    await document.fonts.load('16px "OpenGOST type B"')
+    await document.fonts.load('16px "IBM Plex Mono"')
+    await document.fonts.load('16px "JetBrains Mono"')
   } catch {
     /* the file is still declared in CSS */
   }

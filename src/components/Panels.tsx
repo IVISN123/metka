@@ -234,7 +234,7 @@ export function Inspector() {
                         onClick={() => {
                           const font = fonts.find((item) => item.family === selected.fontFamily)
                           if (!font) return
-                          void removeUserFont(font.id).then(() => engine.updateSelected({ fontFamily: '"OpenGOST type A", sans-serif' }))
+                          void removeUserFont(font.id).then(() => engine.updateSelected({ fontFamily: '"IBM Plex Mono", ui-monospace, monospace' }))
                         }}
                       >
                         {t('removeFont')}
