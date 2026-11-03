@@ -18,48 +18,59 @@
 
 :root,
 :root[data-theme="dark"] {
-  color-scheme: dark;
   --bg: #000000;
   --elev: #16181c;
-  --hover: rgba(231, 233, 234, 0.1);
-  --press: rgba(231, 233, 234, 0.16);
-  --border: #2f3336;
-  --text: #e7e9ea;
-  --muted: #71767b;
+  --hover: rgba(231, 233, 234, 0.14);
+  --press: rgba(231, 233, 234, 0.22);
+  --border: #536471;
+  --text: #f7f9f9;
+  --muted: #b8c1c8;
+  --icon: #ffffff;
+  --field: #000000;
   --accent: #1d9bf0;
   --accent-hover: #1a8cd8;
-  --danger: #f4212e;
-  --pill: #eff3f4;
+  --danger: #ff5a66;
+  --pill: #f7f9f9;
   --pill-text: #0f1419;
   --workspace: #000000;
   --card: #000000;
 }
 
 :root[data-theme="dim"] {
-  color-scheme: dark;
   --bg: #15202b;
   --elev: #1e2732;
-  --hover: rgba(247, 249, 249, 0.1);
-  --press: rgba(247, 249, 249, 0.16);
-  --border: #38444d;
+  --hover: rgba(247, 249, 249, 0.12);
+  --press: rgba(247, 249, 249, 0.18);
+  --border: #5c6e7e;
   --text: #f7f9f9;
-  --muted: #8b98a5;
+  --muted: #c5d0da;
+  --icon: #ffffff;
+  --field: #15202b;
+  --accent: #1d9bf0;
+  --accent-hover: #8ecdf8;
+  --danger: #ff5a66;
+  --pill: #f7f9f9;
+  --pill-text: #15202b;
   --workspace: #0e1720;
   --card: #15202b;
 }
 
 :root[data-theme="light"] {
-  color-scheme: light;
   --bg: #ffffff;
-  --elev: #f7f9f9;
-  --hover: rgba(15, 20, 25, 0.07);
-  --press: rgba(15, 20, 25, 0.12);
-  --border: #eff3f4;
+  --elev: #eef3f6;
+  --hover: rgba(15, 20, 25, 0.08);
+  --press: rgba(15, 20, 25, 0.14);
+  --border: #8b9bab;
   --text: #0f1419;
-  --muted: #536471;
+  --muted: #3d4f5f;
+  --icon: #0f1419;
+  --field: #ffffff;
+  --accent: #1a73c7;
+  --accent-hover: #145ea3;
+  --danger: #b00020;
   --pill: #0f1419;
   --pill-text: #ffffff;
-  --workspace: #d7dee4;
+  --workspace: #d5dee6;
   --card: #ffffff;
 }
 
@@ -84,6 +95,24 @@ input,
 select,
 textarea {
   font-family: inherit;
+  color: var(--text);
+}
+
+select,
+input,
+textarea {
+  background: var(--field);
+}
+
+select option {
+  background: var(--card);
+  color: var(--text);
+}
+
+svg.lucide {
+  color: var(--icon);
+  stroke: currentColor;
+  stroke-width: 2.4;
 }
 
 ::selection {

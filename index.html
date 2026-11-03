@@ -9,6 +9,18 @@
       content="Метка — дизайнер и печать этикеток для термопринтеров Niimbot прямо в браузере."
     />
     <title>Метка — этикетки Niimbot</title>
+    <script>
+      ;(function () {
+        var theme = localStorage.getItem('metka.theme')
+        if (theme !== 'light' && theme !== 'dim') theme = 'dark'
+        document.documentElement.dataset.theme = theme
+      })()
+    </script>
+    <style>
+      html[data-theme='light'] { color-scheme: light; }
+      html[data-theme='dark'],
+      html[data-theme='dim'] { color-scheme: dark; }
+    </style>
   </head>
   <body>
     <div id="root"></div>

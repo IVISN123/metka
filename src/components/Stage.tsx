@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useSyncExternalStore } from 'react'
 import { engine } from '../engine/editor'
+import { FontBar } from './FontBar'
 import { useI18n } from './state'
 
 export function useEngine() {
@@ -28,6 +29,7 @@ export function Stage() {
     <div ref={hostRef} className="canvas-host absolute inset-0 touch-none" style={{ background: 'var(--workspace)' }}>
       <canvas ref={canvasRef} />
       <canvas ref={guideRef} className="pointer-events-none absolute inset-0 z-10" />
+      <FontBar />
       {state.ready && state.layers.length === 0 && (
         <div className="pointer-events-none absolute inset-x-0 top-8 z-20 text-center text-sm text-[var(--muted)]">{t('dropHint')}</div>
       )}

@@ -274,6 +274,23 @@ export class PrinterController {
     }
     if (failure) throw failure
   }
+
+  async flashFirmware(data: Uint8Array, version: string, onProgress?: (current: number, total: number) => void) {
+    const client = this.client
+    if (!client?.isConnected()) throw new Error('notConnected')
+    if (!/^\d+\.\d+$/.test(version)) throw new Error('badVersion')
+    client.stopHeartbeat()
+    const listener = (event: { currentChunk: number; totalChunks: number }) => {
+      onProgress?.(event.currentChunk, event.totalChunks)
+    }
+    client.on('firmwareprogress', listener)
+    try {
+      await client.protocol.firmwareUpgrade(data, version)
+    } finally {
+      client.off('firmwareprogress', listener)
+    }
+    await this.disconnect()
+  }
 }
 
 export const printer = new PrinterController()

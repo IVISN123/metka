@@ -61,7 +61,7 @@ export function Field({ label, children }: { label: string; children: ReactNode 
 }
 
 const control =
-  'h-10 w-full rounded-xl border border-[var(--border)] bg-transparent px-3 text-[15px] outline-none focus:border-[var(--accent)]'
+  'h-11 w-full rounded-xl border-2 border-[var(--border)] bg-[var(--field)] px-3 text-[15px] font-bold text-[var(--text)] outline-none focus:border-[var(--accent)]'
 
 export function TextInput({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={cx(control, className)} />
@@ -69,7 +69,7 @@ export function TextInput({ className, ...props }: InputHTMLAttributes<HTMLInput
 
 export function SelectInput({ className, children, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
-    <select {...props} className={cx(control, 'appearance-none', className)}>
+    <select {...props} className={cx(control, className)}>
       {children}
     </select>
   )

@@ -255,6 +255,21 @@ const ru = {
   removeFont: 'Удалить шрифт',
   fontTooBig: 'Шрифт больше 4 МБ',
   fontFail: 'Этот файл не открылся как шрифт',
+  fontEach: 'У каждого текстового блока свой шрифт. ГОСТ A и ГОСТ B уже в списке.',
+  firmwareFlash: 'Прошивка',
+  flashLead: 'Загрузка файла .bin в D11_H по Bluetooth. Чужой файл или другая мажорная версия убивает принтер.',
+  flashWarn:
+    'Прошивка не той модели или скачок мажора (например с 4.x на 5.x) делает принтер мёртвым. Восстановление часто невозможно. Только файл именно для D11_H, и мажор должен совпадать с железом (4.xx при железе 4.xx). D11_H обычно отвергает версию ниже текущей. Это на ваш риск. Метка не хранит прошивку и не обходит защиту.',
+  flashFile: 'Файл .bin',
+  flashVersion: 'Версия в файле',
+  flashBurn: 'Прошить',
+  flashConfirm:
+    'Прошить принтер этим файлом? Неверный файл или другая мажорная версия может убить принтер без возможности восстановления. Продолжить только если это прошивка именно вашей модели D11_H.',
+  flashDone: 'Прошивка отправлена. Принтер выключится и несколько секунд не будет отвечать.',
+  flashNeedFile: 'Сначала выберите файл .bin',
+  flashBadVersion: 'Версия в виде 4.28',
+  flashLink: 'Официальные образы D11_H (не наши, скачиваете сами)',
+  flashLinkTest: 'Тестовый 4.28 с того же архива',
 } as const
 
 const en: { [K in keyof typeof ru]: string } = {
@@ -512,6 +527,21 @@ const en: { [K in keyof typeof ru]: string } = {
   removeFont: 'Remove font',
   fontTooBig: 'Font is larger than 4 MB',
   fontFail: 'This file did not open as a font',
+  fontEach: 'Each text box has its own font. GOST A and GOST B are already in the list.',
+  firmwareFlash: 'Firmware',
+  flashLead: 'Send a .bin to a D11_H over Bluetooth. The wrong file or a different major version kills the printer.',
+  flashWarn:
+    'The wrong model, or a major-version jump (for example 4.x to 5.x), can leave the printer dead. Recovery is often impossible. Use a D11_H file only, and keep the same major as the hardware (4.xx on hardware 4.xx). A D11_H usually rejects a lower version. This is at your own risk. Metka does not host firmware and does not bypass the check.',
+  flashFile: '.bin file',
+  flashVersion: 'Version in the file',
+  flashBurn: 'Flash',
+  flashConfirm:
+    'Flash the printer with this file? The wrong file or a different major version can kill the printer with no recovery. Continue only if this is firmware for your D11_H.',
+  flashDone: 'Firmware was sent. The printer will shut down and stay silent for a few seconds.',
+  flashNeedFile: 'Choose a .bin file first',
+  flashBadVersion: 'Version looks like 4.28',
+  flashLink: 'Official D11_H images (not ours; you download them)',
+  flashLinkTest: 'Testing build 4.28 from that archive',
 }
 
 export type I18nKey = keyof typeof ru

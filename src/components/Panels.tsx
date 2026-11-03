@@ -78,8 +78,8 @@ export function ToolPanel() {
             onClick={tool.run}
             className="flex flex-col items-center gap-1 rounded-2xl px-1 py-2.5 text-[var(--text)] hover:bg-[var(--hover)]"
           >
-            <tool.icon size={20} strokeWidth={1.75} />
-            <span className="text-[11px] text-[var(--muted)]">{t(tool.key)}</span>
+            <tool.icon size={26} strokeWidth={2.4} />
+            <span className="text-xs font-bold text-[var(--text)]">{t(tool.key)}</span>
           </button>
         ))}
       </div>

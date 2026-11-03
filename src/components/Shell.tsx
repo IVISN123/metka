@@ -164,26 +164,26 @@ export function Shell() {
           {preset?.title ?? `${state.widthMm}×${state.heightMm}`}
         </button>
         <IconButton label={t('undo')} disabled={!state.canUndo} onClick={() => engine.undo()}>
-          <Undo2 size={18} />
+          <Undo2 size={22} />
         </IconButton>
         <IconButton label={t('redo')} disabled={!state.canRedo} onClick={() => engine.redo()}>
-          <Redo2 size={18} />
+          <Redo2 size={22} />
         </IconButton>
         <IconButton label={t('zoomOut')} onClick={() => engine.zoomBy(1 / 1.15)}>
-          <ZoomOut size={18} />
+          <ZoomOut size={22} />
         </IconButton>
         <button type="button" className="hidden h-9 min-w-12 rounded-full px-2 text-sm font-bold tabular-nums hover:bg-[var(--hover)] sm:block" onClick={() => engine.fit()}>
           {Math.round(state.zoom * 100)}%
         </button>
         <IconButton label={t('zoomIn')} onClick={() => engine.zoomBy(1.15)}>
-          <ZoomIn size={18} />
+          <ZoomIn size={22} />
         </IconButton>
         <div className="flex-1" />
         <IconButton label={t('language')} onClick={() => setLang(lang === 'ru' ? 'en' : 'ru')}>
-          <Languages size={18} />
+          <Languages size={22} />
         </IconButton>
         <IconButton label={t('theme')} onClick={() => setMenu(menu === 'theme' ? null : 'theme')}>
-          {theme === 'light' ? <Sun size={18} /> : <Moon size={18} />}
+          {theme === 'light' ? <Sun size={22} /> : <Moon size={22} />}
         </IconButton>
         <button type="button" className="h-9 shrink-0 rounded-full px-3 text-sm font-bold hover:bg-[var(--hover)]" onClick={() => setMenu(menu === 'file' ? null : 'file')}>
           {t('file')}
@@ -192,7 +192,7 @@ export function Shell() {
           {t('templates')}
         </Button>
         <IconButton label={t('save')} className="sm:hidden" onClick={() => void saveCurrent()}>
-          <Save size={18} />
+          <Save size={22} />
         </IconButton>
         <Button className="hidden md:inline-flex" onClick={() => void saveCurrent()}>
           {t('save')}
@@ -332,7 +332,7 @@ export function Shell() {
             {t('statusLine', { w: state.widthMm, h: state.heightMm, pw: pxW, ph: pxH, dpi: state.dpi, model: modelLabel(state.model) })}
           </div>
         </main>
-        <aside className="hidden w-[320px] shrink-0 border-l border-[var(--border)] lg:flex lg:flex-col">
+        <aside className="hidden w-[320px] shrink-0 border-l border-[var(--border)] md:flex md:flex-col">
           <Inspector />
         </aside>
       </div>
