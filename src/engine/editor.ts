@@ -719,13 +719,15 @@ export class EditorEngine {
     this.pushHistory()
   }
 
-  setSize(widthMm: number, heightMm: number) {
+  setSize(widthMm: number, heightMm: number, dpi?: number) {
     const width = clamp(widthMm, 8, 120)
     const height = clamp(heightMm, 8, 200)
-    this.pxW = mmToPx(width, this.snapshot.dpi)
-    this.pxH = mmToPx(height, this.snapshot.dpi)
+    const nextDpi = dpi && Number.isFinite(dpi) ? clamp(Math.round(dpi), 96, 600) : this.snapshot.dpi
+    if (nextDpi !== this.snapshot.dpi) this.applyDpi(nextDpi)
+    this.pxW = mmToPx(width, nextDpi)
+    this.pxH = mmToPx(height, nextDpi)
     this.ensurePaper()
-    this.commit({ widthMm: width, heightMm: height })
+    this.commit({ widthMm: width, heightMm: height, dpi: nextDpi })
     this.pushHistory()
     this.fit()
   }

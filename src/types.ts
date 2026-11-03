@@ -139,6 +139,8 @@ export type PrinterSnapshot = {
   deviceName: string
   model: string
   detectedTask: string
+  dpi: number | null
+  printhead: number | null
   battery: number | null
   paper: boolean | null
   firmware: string

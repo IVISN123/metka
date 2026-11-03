@@ -67,6 +67,26 @@ export function suggestedTask(modelId: string): { task: string; guessed: boolean
   return { task: 'B1', guessed: true }
 }
 
+/** Prefer the connected printer's task. A manual choice is used only when auto-detect is off. */
+export function resolvePrintTask(input: {
+  taskAuto: boolean
+  manual: string
+  detected?: string | null
+  model?: string | null
+  protocolVersion?: number | null
+}): string {
+  if (!input.taskAuto && isPrintTask(input.manual)) return input.manual
+  if (input.detected && isPrintTask(input.detected)) return input.detected
+  const meta = input.model ? metaFor(input.model) : undefined
+  const version = input.protocolVersion && input.protocolVersion > 0 ? input.protocolVersion : undefined
+  if (meta) {
+    const found = findPrintTask(meta.model, version)
+    if (found && isPrintTask(found)) return found
+  }
+  if (isPrintTask(input.manual)) return input.manual
+  return suggestedTask(input.model ?? '').task
+}
+
 export function taskNames(): string[] {
   return [...printTaskNames]
 }

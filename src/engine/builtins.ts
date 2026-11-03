@@ -4,7 +4,7 @@ import type { LabelDocument } from '../types'
 import { barcodeDataUrl, qrDataUrl } from '../lib/codes'
 import { gimbalDataUrl } from '../lib/gimbal'
 import { iconById } from '../lib/icons'
-import { directionOf, suggestedTask } from '../lib/presets'
+import { directionOf, metaFor, suggestedTask } from '../lib/presets'
 import { mmToPx, uid } from '../lib/units'
 
 export type BuiltinSpec = {
@@ -37,7 +37,7 @@ function baseDoc(spec: BuiltinSpec, canvas: Record<string, unknown>): LabelDocum
     name: spec.name.ru,
     widthMm: spec.widthMm,
     heightMm: spec.heightMm,
-    dpi: spec.model === 'D11_H' || spec.model === 'B1_PRO' ? 300 : 203,
+    dpi: metaFor(spec.model)?.dpi ?? 203,
     model: spec.model,
     direction: directionOf(spec.model),
     labelType: 1,
@@ -70,8 +70,9 @@ async function draw(width: number, height: number, paint: (canvas: StaticCanvas)
 export async function buildBuiltin(id: string): Promise<LabelDocument> {
   const spec = BUILTINS.find((item) => item.id === id) ?? BUILTINS[0]
   if (!spec) throw new Error('builtin')
-  const width = mmToPx(spec.widthMm, spec.model === 'D11_H' ? 300 : 203)
-  const height = mmToPx(spec.heightMm, spec.model === 'D11_H' ? 300 : 203)
+  const dpi = metaFor(spec.model)?.dpi ?? 203
+  const width = mmToPx(spec.widthMm, dpi)
+  const height = mmToPx(spec.heightMm, dpi)
   const canvas = await draw(width, height, async (scene) => {
     if (spec.id === 'drone-strip') await paintStrip(scene, width, height)
     else if (spec.id === 'product-card') await paintCard(scene, width, height)

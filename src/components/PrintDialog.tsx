@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useSyncExternalStore } from 'react'
 import { engine } from '../engine/editor'
 import { applySeriesValue } from '../lib/materialize'
-import { LABEL_TYPES, metaFor, suggestedTask, taskNames } from '../lib/presets'
+import { formatPrintError } from '../lib/print-errors'
+import { LABEL_TYPES, metaFor, resolvePrintTask, suggestedTask, taskNames } from '../lib/presets'
 import { renderDocumentThermal } from '../lib/render'
 import { browserSupport } from '../lib/browser'
 import { modelLabel } from '../lib/units'
@@ -16,7 +17,7 @@ import { Button, Field, Modal, SelectInput, Slider, TextInput } from './ui'
 export type BatchJob = { rows: Record<string, string>[]; targetId: string | null } | null
 
 export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob; onClose: () => void; onClearBatch: () => void }) {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const { state } = useEngine()
   const link = useSyncExternalStore(printer.subscribe, printer.getSnapshot, printer.getSnapshot)
   const support = browserSupport()
@@ -24,11 +25,23 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
   const [interval, setInterval] = useState('')
   const [advanced, setAdvanced] = useState(false)
   const guessed = suggestedTask(state.model).guessed
-  const effectiveTask = state.taskAuto && link.detectedTask ? link.detectedTask : state.task
+  const effectiveTask = resolvePrintTask({
+    taskAuto: state.taskAuto,
+    manual: state.task,
+    detected: link.detectedTask,
+    model: link.model || state.model,
+  })
 
   const connect = async (transport: 'bluetooth' | 'serial') => {
     try {
       await printer.connect(transport)
+      const snap = printer.getSnapshot()
+      const editor = engine.getSnapshot()
+      if (editor.taskAuto && snap.model && metaFor(snap.model)) {
+        if (snap.model !== editor.model) engine.setModel(snap.model)
+        else if (snap.dpi && snap.dpi !== editor.dpi) engine.setDpi(snap.dpi)
+        if (snap.detectedTask) engine.setTask(snap.detectedTask, true)
+      }
     } catch {
       const snap = printer.getSnapshot()
       toast(snap.error === 'cancelled' ? t('userCancelled') : snap.error || t('printFail'))
@@ -49,22 +62,26 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
         const next = batch?.targetId && row?.value ? applySeriesValue(doc, batch.targetId, row.value) : doc
         pages.push(await renderDocumentThermal(next, row ?? undefined, now))
       }
-      const head = metaFor(doc.model)
+      const live = printer.getSnapshot()
+      const head = live.printhead ?? metaFor(live.model || doc.model)?.printheadPixels
       await printer.print({
         pages,
         direction: doc.direction,
-        printhead: head?.printheadPixels,
+        printhead: head,
         align: doc.align,
         density: doc.density,
         quantity: doc.quantity,
         labelType: doc.labelType,
-        task: doc.taskAuto && printer.getSnapshot().detectedTask ? printer.getSnapshot().detectedTask : doc.task,
+        task: doc.task,
+        taskAuto: doc.taskAuto,
         packetInterval: interval.trim() === '' ? null : Number(interval),
       })
       toast(t('printDone'))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      toast(message === 'notConnected' ? t('notConnected') : `${t('printFail')}: ${message}`)
+      if (message === 'notConnected') toast(t('notConnected'))
+      else if (message === 'empty') toast(t('printFail'))
+      else toast(formatPrintError(error, lang))
     }
   }
 

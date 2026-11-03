@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   Bluetooth,
   Languages,
@@ -17,6 +17,7 @@ import { browserSupport } from '../lib/browser'
 import { renderDocumentColor, renderDocumentThermal, thumbnailOf } from '../lib/render'
 import { listTemplates, saveDesign, saveTemplate, writeAutosave } from '../lib/storage'
 import { MODEL_IDS, PRESETS, matchingPreset, metaFor } from '../lib/presets'
+import { printer } from '../printer/controller'
 import { downloadText, downloadUrl, mmToPx, modelLabel, slug, uid, uniqueName } from '../lib/units'
 import { toast } from '../toast'
 import type { ThemeName } from '../types'
@@ -32,6 +33,8 @@ export function Shell() {
   const { t, lang, setLang } = useI18n()
   const { theme, setTheme } = useTheme()
   const { state } = useEngine()
+  const link = useSyncExternalStore(printer.subscribe, printer.getSnapshot, printer.getSnapshot)
+  const sizeDpi = link.status === 'connected' && link.dpi ? link.dpi : state.dpi
   const [sheet, setSheet] = useState<null | 'tools' | 'layers' | 'props'>(null)
   const [menu, setMenu] = useState<null | 'size' | 'file' | 'theme'>(null)
   const [gallery, setGallery] = useState<null | { tab: 'templates' | 'designs'; compose: boolean }>(null)
@@ -258,7 +261,7 @@ export function Shell() {
                   key={item.id}
                   type="button"
                   onClick={() => {
-                    engine.setSize(item.widthMm, item.heightMm)
+                    engine.setSize(item.widthMm, item.heightMm, sizeDpi)
                     setMenu(null)
                   }}
                   className={`rounded-2xl px-2 py-2 text-left hover:bg-[var(--hover)] ${preset?.id === item.id ? 'bg-[var(--hover)]' : ''}`}
@@ -281,7 +284,7 @@ export function Shell() {
             <div className="mt-2 flex flex-wrap gap-2">
               <Button
                 onClick={() => {
-                  engine.setSize(Number(customW), Number(customH))
+                  engine.setSize(Number(customW), Number(customH), sizeDpi)
                   setMenu(null)
                 }}
               >

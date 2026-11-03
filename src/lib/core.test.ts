@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { ImageEncoder, PageColorType } from '@mmote/niimbluelib'
+import { ImageEncoder, PageColorType, PrintError } from '@mmote/niimbluelib'
 import { parseImport, serializeTemplates } from './bundle'
 import { parseCsv, seriesValues } from './csv'
 import { ditherLuma } from './dither'
+import { formatPrintError } from './print-errors'
+import { metaFor, resolvePrintTask, suggestedTask } from './presets'
 import { fillTemplate, formatDate, mmToPx, padAxis, uniqueName, verticalize } from './units'
 import type { LabelDocument, TemplateRecord } from '../types'
 
@@ -90,6 +92,28 @@ describe('template files', () => {
     const design = parseImport(JSON.stringify(doc()))
     expect(design.type).toBe('design')
     expect(() => parseImport('{')).toThrow()
+  })
+})
+
+describe('D11_H print profile', () => {
+  it('uses 300 DPI, a 142-dot head, and the D110M_V4 task', () => {
+    const meta = metaFor('D11_H')
+    expect(meta?.dpi).toBe(300)
+    expect(meta?.printheadPixels).toBe(142)
+    expect(meta?.printDirection).toBe('left')
+    expect(mmToPx(12, meta?.dpi ?? 0)).toBe(142)
+    expect(mmToPx(40, 300)).toBe(472)
+    expect(suggestedTask('D11_H')).toEqual({ task: 'D110M_V4', guessed: false })
+    expect(resolvePrintTask({ taskAuto: true, manual: 'D110', detected: '', model: 'D11_H' })).toBe('D110M_V4')
+    expect(resolvePrintTask({ taskAuto: true, manual: 'B1', detected: 'D110M_V4', model: 'D110' })).toBe('D110M_V4')
+    expect(resolvePrintTask({ taskAuto: false, manual: 'D110', detected: 'D110M_V4', model: 'D11_H' })).toBe('D110')
+  })
+
+  it('explains RFID write failure in Russian', () => {
+    const text = formatPrintError(new PrintError('Print error 20: WriteRfidFail', 20), 'ru')
+    expect(text).toContain('RFID')
+    expect(text).toContain('крышку')
+    expect(formatPrintError(new Error('Print error 20: WriteRfidFail'), 'ru')).toContain('рулон')
   })
 })
 

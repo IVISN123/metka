@@ -8,7 +8,7 @@ import {
 } from '@mmote/niimbluelib'
 import type { AlignMode, PrintDirection, PrinterSnapshot } from '../types'
 import { describeEncoded, padCanvas } from '../lib/encode'
-import { isPrintTask } from '../lib/presets'
+import { resolvePrintTask } from '../lib/presets'
 
 export type PrintJob = {
   pages: HTMLCanvasElement[]
@@ -19,6 +19,7 @@ export type PrintJob = {
   quantity: number
   labelType: number
   task: string
+  taskAuto: boolean
   packetInterval: number | null
 }
 
@@ -28,6 +29,8 @@ const initial = (): PrinterSnapshot => ({
   deviceName: '',
   model: '',
   detectedTask: '',
+  dpi: null,
+  printhead: null,
   battery: null,
   paper: null,
   firmware: '',
@@ -68,6 +71,8 @@ export class PrinterController {
         deviceName: event.info.deviceName ?? '',
         model: meta?.model ?? (info.modelId ? `#${info.modelId}` : ''),
         detectedTask: client.getPrintTaskType() ?? '',
+        dpi: meta?.dpi ?? null,
+        printhead: meta?.printheadPixels ?? null,
         battery: info.batteryPercents ?? client.getHeartbeatData().batteryPercents ?? null,
         firmware: info.softwareVersion ?? '',
         serial: info.serial ?? '',
@@ -98,14 +103,25 @@ export class PrinterController {
     })
     try {
       await client.connect()
+      if (!client.getModelMetadata()) {
+        try {
+          await client.fetchPrinterInfo()
+        } catch {
+          /* connect() already fetched what this model answers */
+        }
+      }
+      client.startHeartbeat()
       const info = client.getPrinterInfo()
+      const meta = client.getModelMetadata()
       this.patch({
         status: 'connected',
         battery: info.batteryPercents ?? client.getHeartbeatData().batteryPercents ?? this.snapshot.battery,
         firmware: info.softwareVersion ?? this.snapshot.firmware,
         serial: info.serial ?? this.snapshot.serial,
         detectedTask: client.getPrintTaskType() ?? this.snapshot.detectedTask,
-        model: client.getModelMetadata()?.model ?? this.snapshot.model,
+        model: meta?.model ?? this.snapshot.model,
+        dpi: meta?.dpi ?? this.snapshot.dpi,
+        printhead: meta?.printheadPixels ?? this.snapshot.printhead,
       })
     } catch (error) {
       this.client = null
@@ -143,33 +159,40 @@ export class PrinterController {
     if (!client?.isConnected()) throw new Error('notConnected')
     if (job.pages.length === 0) throw new Error('empty')
     const quantity = Math.max(1, Math.round(job.quantity))
-    const taskName = (isPrintTask(job.task) ? job.task : 'B1') as PrintTaskName
+    const meta = client.getModelMetadata()
+    const info = client.getPrinterInfo()
+    const taskName = resolvePrintTask({
+      taskAuto: job.taskAuto,
+      manual: job.task,
+      detected: client.getPrintTaskType() ?? this.snapshot.detectedTask,
+      model: meta?.model ?? this.snapshot.model,
+      protocolVersion: info.protocolVersion,
+    }) as PrintTaskName
+    let density = Math.round(job.density)
+    if (meta) density = Math.min(meta.densityMax, Math.max(meta.densityMin, density))
+    const printhead = meta?.printheadPixels ?? job.printhead
     if (job.packetInterval !== null && Number.isFinite(job.packetInterval)) {
       client.setPacketInterval(Math.max(0, job.packetInterval))
     }
-    try {
-      await client.fetchHeartbeatData()
-    } catch {
-      /* some models ignore heartbeat */
-    }
-    const resumeHeartbeat = client.isHeartbeatStarted()
-    if (resumeHeartbeat) client.stopHeartbeat()
+    // NiimBlue always stops the heartbeat before print. niimbluelib 0.49's
+    // isHeartbeatStarted() is inverted, so do not trust it.
+    client.stopHeartbeat()
     const totalPages = job.pages.length * quantity
     const task = client.protocol.newPrintTask(taskName, {
       totalPages,
-      density: job.density,
+      density,
+      speed: 1,
       labelType: job.labelType as LabelType,
       pageColor: PageColorType.SingleColor,
       statusPollIntervalMs: 100,
       statusTimeoutMs: 8_000,
-      pageTimeoutMs: 15_000,
     })
     this.patch({ printing: true, progress: 0, progressLabel: '', error: '' })
     let failure: unknown
     try {
       await task.printInit()
       for (const page of job.pages) {
-        const { canvas } = padCanvas(page, job.direction, job.printhead, job.align)
+        const { canvas } = padCanvas(page, job.direction, printhead, job.align)
         const encoded = ImageEncoder.encodeCanvas(canvas, PageColorType.SingleColor, job.direction)
         await task.printPage(encoded, quantity)
         await task.waitForPageFinished()
@@ -183,7 +206,7 @@ export class PrinterController {
       } catch (error) {
         failure ??= error
       }
-      if (resumeHeartbeat) client.startHeartbeat()
+      if (client.isConnected()) client.startHeartbeat()
       this.patch({ printing: false, progress: failure ? this.snapshot.progress : 100 })
     }
     if (failure) throw failure
