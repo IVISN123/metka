@@ -133,6 +133,17 @@ export type EditorState = {
   workspace: string
 }
 
+export type RfidView = {
+  present: boolean | null
+  used: number | null
+  total: number | null
+  kind: number | null
+  barcode: string
+  readOk: boolean | null
+  widthMm: number | null
+  heightMm: number | null
+}
+
 export type PrinterSnapshot = {
   status: 'idle' | 'connecting' | 'connected' | 'error'
   transport: 'bluetooth' | 'serial' | null
@@ -144,12 +155,28 @@ export type PrinterSnapshot = {
   battery: number | null
   paper: boolean | null
   firmware: string
+  hardware: string
+  protocol: number | null
   serial: string
+  rfid: RfidView
+  packetLog: string
+  lastPrint: string
   error: string
   printing: boolean
   progress: number
   progressLabel: string
 }
+
+export const emptyRfid = (): RfidView => ({
+  present: null,
+  used: null,
+  total: null,
+  kind: null,
+  barcode: '',
+  readOk: null,
+  widthMm: null,
+  heightMm: null,
+})
 
 export const initialEditorState = (): EditorState => ({
   ready: false,

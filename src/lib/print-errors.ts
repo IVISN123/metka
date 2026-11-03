@@ -79,8 +79,8 @@ const messages: Record<number, Record<Lang, string>> = {
     en: 'The printer rejected the density. Choose a value in the model range.',
   },
   [PrinterErrorCode.WriteRfidFail]: {
-    ru: 'Не удалось записать RFID рулона (ошибка 20). Проверьте крышку и рулон: закройте крышку, вставьте этикетки до упора и повторите печать.',
-    en: 'Could not write the roll RFID (error 20). Check the cover and the roll: close the cover, seat the labels fully, and print again.',
+    ru: 'Ошибка 20: прошивка принтера не записала RFID рулона. Официальное приложение Niimbot отказывает так же — это считыватель или прошивка, не Метка. Смена задачи печати RFID не отключает.',
+    en: 'Error 20: the printer firmware could not write the roll RFID. The official Niimbot app refuses the same way. This is the reader or the firmware, not Metka. Changing the print task does not turn RFID off.',
   },
   [PrinterErrorCode.SetMarginFail]: {
     ru: 'Не удалось установить поля.',
@@ -115,8 +115,8 @@ const messages: Record<number, Record<Lang, string>> = {
     en: 'The printer asked to check the paper.',
   },
   [PrinterErrorCode.RfidTagNotWritten]: {
-    ru: 'RFID рулона не записана (ошибка 29). Переустановите рулон, закройте крышку и повторите печать.',
-    en: 'The roll RFID was not written (error 29). Reseat the roll, close the cover, and print again.',
+    ru: 'Ошибка 29: прошивка не записала RFID рулона. Официальное приложение ведёт себя так же. Это состояние принтера, не ошибка Метки.',
+    en: 'Error 29: the firmware did not write the roll RFID. The official app behaves the same way. This is the printer, not Metka.',
   },
   [PrinterErrorCode.SetPrintDensityNoSupport]: {
     ru: 'Эта модель не поддерживает выбранную плотность.',
@@ -135,8 +135,8 @@ const messages: Record<number, Record<Lang, string>> = {
     en: 'This label material is not supported.',
   },
   [PrinterErrorCode.NotSupportWrittenRfid]: {
-    ru: 'Принтер не может записать RFID этого рулона (ошибка 34). Проверьте, что крышка закрыта и этикетки вставлены до упора.',
-    en: 'The printer cannot write this roll RFID (error 34). Close the cover and seat the labels fully.',
+    ru: 'Ошибка 34: прошивка не поддерживает запись RFID этого рулона. Официальное приложение отказывает так же.',
+    en: 'Error 34: the firmware cannot write this roll RFID. The official app refuses the same way.',
   },
   [PrinterErrorCode.IllegalPage]: {
     ru: 'Недопустимый размер страницы. Сверьте миллиметры с DPI принтера.',

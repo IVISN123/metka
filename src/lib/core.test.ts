@@ -3,6 +3,7 @@ import { ImageEncoder, PageColorType, PrintError } from '@mmote/niimbluelib'
 import { parseImport, serializeTemplates } from './bundle'
 import { parseCsv, seriesValues } from './csv'
 import { ditherLuma } from './dither'
+import { formatPacketLine, rfidFromClient } from './diag'
 import { formatPrintError } from './print-errors'
 import { metaFor, resolvePrintTask, suggestedTask } from './presets'
 import { fillTemplate, formatDate, mmToPx, padAxis, uniqueName, verticalize } from './units'
@@ -111,9 +112,18 @@ describe('D11_H print profile', () => {
 
   it('explains RFID write failure in Russian', () => {
     const text = formatPrintError(new PrintError('Print error 20: WriteRfidFail', 20), 'ru')
-    expect(text).toContain('RFID')
-    expect(text).toContain('крышку')
-    expect(formatPrintError(new Error('Print error 20: WriteRfidFail'), 'ru')).toContain('рулон')
+    expect(text).toContain('прошивка')
+    expect(text).toContain('Официальное')
+    expect(formatPrintError(new Error('Print error 20: WriteRfidFail'), 'ru')).toContain('RFID')
+  })
+
+  it('formats a short packet line and an unread roll', () => {
+    const line = formatPacketLine('>>', 1, new Uint8Array([85, 85]))
+    expect(line.startsWith('>> ')).toBe(true)
+    expect(line).toContain('55 55')
+    const unread = rfidFromClient({ paperRfidSuccess: false })
+    expect(unread.present).toBeNull()
+    expect(unread.readOk).toBe(false)
   })
 })
 

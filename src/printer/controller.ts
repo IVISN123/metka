@@ -6,7 +6,9 @@ import {
   type NiimbotAbstractClient,
   type PrintTaskName,
 } from '@mmote/niimbluelib'
-import type { AlignMode, PrintDirection, PrinterSnapshot } from '../types'
+import type { AlignMode, PrintDirection, PrinterSnapshot, RfidView } from '../types'
+import { emptyRfid } from '../types'
+import { formatPacketLine, rfidFromClient } from '../lib/diag'
 import { describeEncoded, padCanvas } from '../lib/encode'
 import { resolvePrintTask } from '../lib/presets'
 
@@ -34,7 +36,12 @@ const initial = (): PrinterSnapshot => ({
   battery: null,
   paper: null,
   firmware: '',
+  hardware: '',
+  protocol: null,
   serial: '',
+  rfid: emptyRfid(),
+  packetLog: '',
+  lastPrint: '',
   error: '',
   printing: false,
   progress: 0,
@@ -45,6 +52,40 @@ export class PrinterController {
   private client: NiimbotAbstractClient | null = null
   private snapshot: PrinterSnapshot = initial()
   private listeners = new Set<() => void>()
+  private packetLines: string[] = []
+  private printLogAt = 0
+
+  private note(line: string) {
+    this.packetLines.push(line)
+    if (this.packetLines.length > 500) this.packetLines.splice(0, this.packetLines.length - 500)
+  }
+
+  private readRfid(client: NiimbotAbstractClient): RfidView {
+    const info = client.getRfidInfo()
+    const beat = client.getHeartbeatData()
+    return rfidFromClient({
+      label: info.labelRfidInfo,
+      paper: info.paperInfo,
+      paperRfidSuccess: beat.paperRfidSuccess,
+    })
+  }
+
+  private identity(client: NiimbotAbstractClient) {
+    const info = client.getPrinterInfo()
+    const meta = client.getModelMetadata()
+    return {
+      model: meta?.model ?? (info.modelId ? `#${info.modelId}` : this.snapshot.model),
+      detectedTask: client.getPrintTaskType() ?? this.snapshot.detectedTask,
+      dpi: meta?.dpi ?? this.snapshot.dpi,
+      printhead: meta?.printheadPixels ?? this.snapshot.printhead,
+      battery: info.batteryPercents ?? client.getHeartbeatData().batteryPercents ?? this.snapshot.battery,
+      firmware: info.softwareVersion ?? this.snapshot.firmware,
+      hardware: info.hardwareVersion ?? this.snapshot.hardware,
+      protocol: info.protocolVersion ?? this.snapshot.protocol,
+      serial: info.serial ?? this.snapshot.serial,
+      rfid: this.readRfid(client),
+    }
+  }
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener)
@@ -62,33 +103,36 @@ export class PrinterController {
     await this.disconnect()
     const client = instantiateClient(transport)
     this.client = client
+    this.packetLines = []
     this.patch({ status: 'connecting', transport, error: '', progress: 0, progressLabel: '' })
+    client.on('packetsent', (event) => {
+      this.note(formatPacketLine('>>', event.packet.command, event.packet.toBytes()))
+    })
+    client.on('packetreceived', (event) => {
+      this.note(formatPacketLine('<<', event.packet.command, event.packet.toBytes()))
+    })
     client.on('connect', (event) => {
-      const info = client.getPrinterInfo()
-      const meta = client.getModelMetadata()
       this.patch({
         status: 'connected',
         deviceName: event.info.deviceName ?? '',
-        model: meta?.model ?? (info.modelId ? `#${info.modelId}` : ''),
-        detectedTask: client.getPrintTaskType() ?? '',
-        dpi: meta?.dpi ?? null,
-        printhead: meta?.printheadPixels ?? null,
-        battery: info.batteryPercents ?? client.getHeartbeatData().batteryPercents ?? null,
-        firmware: info.softwareVersion ?? '',
-        serial: info.serial ?? '',
+        ...this.identity(client),
         error: '',
       })
     })
     client.on('disconnect', () => {
       if (this.client === client) {
         this.client = null
-        this.patch({ ...initial(), error: this.snapshot.error })
+        this.patch(this.parked(this.snapshot.error))
       }
+    })
+    client.on('rfidinfofetched', () => {
+      this.patch({ rfid: this.readRfid(client) })
     })
     client.on('heartbeat', (event) => {
       this.patch({
         battery: event.data.batteryPercents ?? this.snapshot.battery,
         paper: event.data.paperInserted ?? this.snapshot.paper,
+        rfid: { ...this.snapshot.rfid, readOk: event.data.paperRfidSuccess ?? this.snapshot.rfid.readOk },
       })
     })
     client.on('printprogress', (event) => {
@@ -111,18 +155,7 @@ export class PrinterController {
         }
       }
       client.startHeartbeat()
-      const info = client.getPrinterInfo()
-      const meta = client.getModelMetadata()
-      this.patch({
-        status: 'connected',
-        battery: info.batteryPercents ?? client.getHeartbeatData().batteryPercents ?? this.snapshot.battery,
-        firmware: info.softwareVersion ?? this.snapshot.firmware,
-        serial: info.serial ?? this.snapshot.serial,
-        detectedTask: client.getPrintTaskType() ?? this.snapshot.detectedTask,
-        model: meta?.model ?? this.snapshot.model,
-        dpi: meta?.dpi ?? this.snapshot.dpi,
-        printhead: meta?.printheadPixels ?? this.snapshot.printhead,
-      })
+      this.patch({ status: 'connected', ...this.identity(client) })
     } catch (error) {
       this.client = null
       client.removeAllListeners()
@@ -138,11 +171,30 @@ export class PrinterController {
     }
   }
 
+  private parked(error = ''): PrinterSnapshot {
+    return {
+      ...initial(),
+      error,
+      deviceName: this.snapshot.deviceName,
+      model: this.snapshot.model,
+      detectedTask: this.snapshot.detectedTask,
+      dpi: this.snapshot.dpi,
+      printhead: this.snapshot.printhead,
+      firmware: this.snapshot.firmware,
+      hardware: this.snapshot.hardware,
+      protocol: this.snapshot.protocol,
+      serial: this.snapshot.serial,
+      rfid: this.snapshot.rfid,
+      packetLog: this.snapshot.packetLog,
+      lastPrint: this.snapshot.lastPrint,
+    }
+  }
+
   async disconnect() {
     const client = this.client
     this.client = null
     if (!client) {
-      this.patch(initial())
+      this.patch(this.parked())
       return
     }
     client.removeAllListeners()
@@ -151,7 +203,7 @@ export class PrinterController {
     } catch {
       /* already gone */
     }
-    this.patch(initial())
+    this.patch(this.parked())
   }
 
   async print(job: PrintJob) {
@@ -178,6 +230,9 @@ export class PrinterController {
     // isHeartbeatStarted() is inverted, so do not trust it.
     client.stopHeartbeat()
     const totalPages = job.pages.length * quantity
+    this.printLogAt = this.packetLines.length
+    const plan = `# print task=${taskName} density=${density} labelType=${job.labelType} totalPages=${totalPages} printhead=${printhead ?? '-'} firmware=${info.softwareVersion ?? this.snapshot.firmware}`
+    this.note(plan)
     const task = client.protocol.newPrintTask(taskName, {
       totalPages,
       density,
@@ -207,7 +262,15 @@ export class PrinterController {
         failure ??= error
       }
       if (client.isConnected()) client.startHeartbeat()
-      this.patch({ printing: false, progress: failure ? this.snapshot.progress : 100 })
+      this.patch({
+        printing: false,
+        progress: failure ? this.snapshot.progress : 100,
+        lastPrint: plan,
+        packetLog: this.packetLines.slice(this.printLogAt).join('\n'),
+        rfid: client.isConnected() ? this.readRfid(client) : this.snapshot.rfid,
+        firmware: info.softwareVersion ?? this.snapshot.firmware,
+        hardware: info.hardwareVersion ?? this.snapshot.hardware,
+      })
     }
     if (failure) throw failure
   }

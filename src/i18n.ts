@@ -231,6 +231,20 @@ const ru = {
   transportUsb: 'USB / последовательный порт',
   supportedHere: 'Этот браузер может подключаться к принтеру.',
   localOnly: 'Всё хранится только на этом устройстве. Сервера нет.',
+  diagnostics: 'Диагностика',
+  protocol: 'Протокол',
+  hardware: 'Железо',
+  rfid: 'RFID рулона',
+  rfidNone: 'Метка не прочитана',
+  rfidUnread: 'Считыватель не подтвердил метку',
+  rfidLine: '{used} из {total}, тип {kind}{barcode}',
+  printPlan: 'Задача {task} · {dpi} DPI · страница {w}×{h} px · головка {head}',
+  noPacketLog: 'Журнала ещё нет. Он появится после попытки печати.',
+  copyLog: 'Скопировать',
+  copied: 'Диагностика скопирована',
+  copyFail: 'Не удалось скопировать',
+  diagNote:
+    'Если печать падает с ошибкой 20, прошивка не приняла RFID рулона. Официальное приложение Niimbot отказывает так же: это считыватель или прошивка принтера. Номер прошивки — в строке выше.',
 } as const
 
 const en: { [K in keyof typeof ru]: string } = {
@@ -464,6 +478,20 @@ const en: { [K in keyof typeof ru]: string } = {
   transportUsb: 'USB / serial',
   supportedHere: 'This browser can connect to a printer.',
   localOnly: 'Everything stays on this device. There is no server.',
+  diagnostics: 'Diagnostics',
+  protocol: 'Protocol',
+  hardware: 'Hardware',
+  rfid: 'Roll RFID',
+  rfidNone: 'Tag was not read',
+  rfidUnread: 'The reader did not confirm a tag',
+  rfidLine: '{used} of {total}, type {kind}{barcode}',
+  printPlan: 'Task {task} · {dpi} DPI · page {w}×{h} px · head {head}',
+  noPacketLog: 'No log yet. It appears after a print attempt.',
+  copyLog: 'Copy',
+  copied: 'Diagnostics copied',
+  copyFail: 'Could not copy',
+  diagNote:
+    'Error 20 means the firmware rejected the roll RFID. The official Niimbot app refuses the same way: it is the reader or the printer firmware. The firmware number is in the row above.',
 }
 
 export type I18nKey = keyof typeof ru

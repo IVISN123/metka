@@ -6,7 +6,7 @@ import { formatPrintError } from '../lib/print-errors'
 import { LABEL_TYPES, metaFor, resolvePrintTask, suggestedTask, taskNames } from '../lib/presets'
 import { renderDocumentThermal } from '../lib/render'
 import { browserSupport } from '../lib/browser'
-import { modelLabel } from '../lib/units'
+import { mmToPx, modelLabel } from '../lib/units'
 import { printer } from '../printer/controller'
 import { toast } from '../toast'
 import type { I18nKey } from '../i18n'
@@ -24,6 +24,9 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
   const meta = metaFor(state.model)
   const [interval, setInterval] = useState('')
   const [advanced, setAdvanced] = useState(false)
+  const [diag, setDiag] = useState(false)
+  const pageW = mmToPx(state.widthMm, state.dpi)
+  const pageH = mmToPx(state.heightMm, state.dpi)
   const guessed = suggestedTask(state.model).guessed
   const effectiveTask = resolvePrintTask({
     taskAuto: state.taskAuto,
@@ -37,7 +40,7 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
       await printer.connect(transport)
       const snap = printer.getSnapshot()
       const editor = engine.getSnapshot()
-      if (editor.taskAuto && snap.model && metaFor(snap.model)) {
+      if (snap.model && metaFor(snap.model)) {
         if (snap.model !== editor.model) engine.setModel(snap.model)
         else if (snap.dpi && snap.dpi !== editor.dpi) engine.setDpi(snap.dpi)
         if (snap.detectedTask) engine.setTask(snap.detectedTask, true)
@@ -200,13 +203,79 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
             </div>
           </div>
         )}
-        <p className="text-xs leading-5 text-[var(--muted)]">{t('printUntested')}</p>
+        <p className="text-xs leading-5 text-[var(--muted)]">
+          {t('printPlan', {
+            task: effectiveTask,
+            dpi: state.dpi,
+            w: pageW,
+            h: pageH,
+            head: link.printhead ?? '—',
+          })}
+          {link.dpi && link.dpi !== state.dpi ? ` · ${t('dpi')} ${link.dpi}` : ''}
+        </p>
+        <button type="button" className="text-left text-sm font-bold text-[var(--accent)]" onClick={() => setDiag((open) => !open)}>
+          {t('diagnostics')}
+        </button>
+        {diag && (
+          <div className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] p-3 text-sm">
+            <dl className="grid grid-cols-2 gap-2">
+              <Info k={t('model')} v={link.model ? modelLabel(link.model) : '—'} />
+              <Info k={t('firmware')} v={link.firmware || '—'} />
+              <Info k={t('hardware')} v={link.hardware || '—'} />
+              <Info k={t('protocol')} v={link.protocol === null ? '—' : String(link.protocol)} />
+              <Info k={t('printTask')} v={link.detectedTask || '—'} />
+              <Info k={t('serial')} v={link.serial || '—'} />
+              <Info k={t('rfid')} v={rfidLabel(link.rfid, t)} />
+            </dl>
+            <p className="text-xs leading-5 text-[var(--muted)]">{t('diagNote')}</p>
+            {link.lastPrint && <p className="break-all font-mono text-[11px] leading-4">{link.lastPrint}</p>}
+            <textarea
+              readOnly
+              className="h-40 w-full resize-y rounded-xl border border-[var(--border)] bg-transparent p-2 font-mono text-[11px] leading-4"
+              value={link.packetLog || t('noPacketLog')}
+            />
+            <Button
+              onClick={() => {
+                const text = [
+                  `model ${link.model || '-'}`,
+                  `firmware ${link.firmware || '-'}`,
+                  `hardware ${link.hardware || '-'}`,
+                  `protocol ${link.protocol ?? '-'}`,
+                  `detected ${link.detectedTask || '-'}`,
+                  `task ${effectiveTask}`,
+                  `dpi ${state.dpi}`,
+                  `page ${pageW}x${pageH}`,
+                  `head ${link.printhead ?? '-'}`,
+                  `rfid ${rfidLabel(link.rfid, t)}`,
+                  link.lastPrint,
+                  link.packetLog,
+                ]
+                  .filter(Boolean)
+                  .join('\n')
+                void navigator.clipboard.writeText(text).then(
+                  () => toast(t('copied')),
+                  () => toast(t('copyFail')),
+                )
+              }}
+            >
+              {t('copyLog')}
+            </Button>
+          </div>
+        )}
         <Button variant="primary" disabled={link.printing || !state.ready} onClick={() => void send()}>
           {t('sendPrint')}
         </Button>
       </div>
     </Modal>
   )
+}
+
+function rfidLabel(rfid: { present: boolean | null; used: number | null; total: number | null; kind: number | null; barcode: string; readOk: boolean | null; widthMm: number | null; heightMm: number | null }, t: (key: I18nKey, vars?: Record<string, string | number>) => string) {
+  if (rfid.present === false || (rfid.present === null && rfid.readOk === false)) return t('rfidNone')
+  if (rfid.used === null && rfid.present !== true) return rfid.readOk === false ? t('rfidUnread') : t('paperUnknown')
+  const barcode = rfid.barcode ? `, ${rfid.barcode}` : ''
+  const size = rfid.widthMm && rfid.heightMm ? ` · ${rfid.widthMm}×${rfid.heightMm}` : ''
+  return `${t('rfidLine', { used: rfid.used ?? '—', total: rfid.total ?? '—', kind: rfid.kind ?? '—', barcode })}${size}`
 }
 
 function Info({ k, v }: { k: string; v: string }) {
