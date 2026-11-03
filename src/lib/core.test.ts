@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { ImageEncoder, PageColorType, PrintError } from '@mmote/niimbluelib'
 import { parseImport, serializeTemplates } from './bundle'
 import { parseCsv, seriesValues } from './csv'
-import { ditherLuma } from './dither'
+import { ditherLuma, sharpenLuma, sharpnessCut } from './dither'
 import { formatPacketLine, rfidFromClient } from './diag'
 import { formatPrintError } from './print-errors'
 import { metaFor, resolvePrintTask, suggestedTask } from './presets'
@@ -64,6 +64,18 @@ describe('dither', () => {
     const gray = new Float32Array([0, 40, 200, 255])
     const out = ditherLuma(gray, 2, 2, 'threshold', 128)
     expect([...out]).toEqual([0, 0, 255, 255])
+  })
+
+  it('keeps a light gray edge white at the default cut and black when sharpened', () => {
+    const plain = ditherLuma(new Float32Array([180]), 1, 1, 'threshold', 168)
+    expect(plain[0]).toBe(255)
+    const clear = sharpnessCut('clear')
+    expect(clear?.threshold).toBeGreaterThan(168)
+    const bits = ditherLuma(new Float32Array([180]), 1, 1, 'threshold', clear?.threshold ?? 168)
+    expect(bits[0]).toBe(0)
+    const edge = new Float32Array([255, 140, 255, 255, 140, 255, 255, 140, 255])
+    const sharp = sharpenLuma(edge, 3, 3, 1.5)
+    expect(sharp[4]).toBeLessThan(140)
   })
 
   it('spreads floyd error instead of posting a lone mid gray', () => {

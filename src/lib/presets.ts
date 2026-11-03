@@ -115,6 +115,8 @@ export function matchingPreset(widthMm: number, heightMm: number): Preset | unde
 }
 
 export const FONTS = [
+  { id: 'gost-a', label: 'ГОСТ A', family: '"OpenGOST type A", sans-serif' },
+  { id: 'gost-b', label: 'ГОСТ B', family: '"OpenGOST type B", sans-serif' },
   { id: 'arial', label: 'Arial', family: 'Arial, Helvetica, sans-serif' },
   { id: 'system', label: 'System', family: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif' },
   { id: 'impact', label: 'Impact', family: 'Impact, Haettenschweiler, sans-serif' },

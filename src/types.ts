@@ -4,12 +4,14 @@ export type PrintDirection = 'left' | 'top'
 export type AlignMode = 'start' | 'center' | 'end'
 export type DitherMode = 'threshold' | 'floyd' | 'atkinson'
 export type DitherChoice = 'inherit' | DitherMode
+export type Sharpness = 'off' | 'clear' | 'strong'
 export type ObjectKind = 'text' | 'image' | 'icon' | 'shape' | 'barcode' | 'qr' | 'datetime' | 'paper'
 
 export type PreviewSettings = {
   mode: DitherMode
   threshold: number
   invert: boolean
+  sharpness?: Sharpness
 }
 
 export type Meta = {
@@ -194,7 +196,7 @@ export const initialEditorState = (): EditorState => ({
   align: 'center',
   task: 'D110',
   taskAuto: true,
-  preview: { mode: 'floyd', threshold: 168, invert: false },
+  preview: { mode: 'floyd', threshold: 168, invert: false, sharpness: 'off' },
   zoom: 1,
   canUndo: false,
   canRedo: false,

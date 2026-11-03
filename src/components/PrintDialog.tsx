@@ -10,6 +10,7 @@ import { mmToPx, modelLabel } from '../lib/units'
 import { printer } from '../printer/controller'
 import { toast } from '../toast'
 import type { I18nKey } from '../i18n'
+import type { Sharpness } from '../types'
 import { useI18n } from './state'
 import { useEngine } from './Stage'
 import { Button, Field, Modal, SelectInput, Slider, TextInput } from './ui'
@@ -137,6 +138,17 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
           </div>
         )}
 
+        <Field label={t('sharpness')}>
+          <SelectInput
+            value={state.preview.sharpness ?? 'off'}
+            onChange={(event) => engine.setPreview({ sharpness: event.target.value as Sharpness })}
+          >
+            <option value="off">{t('sharpOff')}</option>
+            <option value="clear">{t('sharpClear')}</option>
+            <option value="strong">{t('sharpStrong')}</option>
+          </SelectInput>
+          <span className="mt-1 block text-xs text-[var(--muted)]">{t('sharpHint')}</span>
+        </Field>
         <Field label={`${t('density')} ${state.density}`}>
           <Slider
             min={meta?.densityMin ?? 1}

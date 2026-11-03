@@ -1,6 +1,7 @@
 import { StaticCanvas, type FabricObject } from 'fabric'
-import type { DitherMode, LabelDocument, Meta } from '../types'
-import { ditherLuma } from './dither'
+import type { DitherMode, LabelDocument, Meta, Sharpness } from '../types'
+import { ditherLuma, sharpnessCut, sharpenLuma } from './dither'
+import { ensureFontsReady } from './fonts'
 import { materialize } from './materialize'
 import { mmToPx } from './units'
 
@@ -38,10 +39,12 @@ export async function renderDocumentColor(doc: LabelDocument): Promise<HTMLCanva
 }
 
 export async function renderDocumentThermal(doc: LabelDocument, row?: Record<string, string>, now = new Date()) {
+  await ensureFontsReady()
   const prepared = await materialize(doc, row, now)
   const width = mmToPx(prepared.widthMm, prepared.dpi)
   const height = mmToPx(prepared.heightMm, prepared.dpi)
   const canvas = await loadScene(prepared, width, height, '#ffffff')
+  const sharpness = prepared.preview.sharpness ?? 'off'
   try {
     const out = document.createElement('canvas')
     out.width = width
@@ -56,10 +59,12 @@ export async function renderDocumentThermal(doc: LabelDocument, row?: Record<str
       if (!meta || meta.kind === 'paper' || obj.visible === false) continue
       obj.setCoords()
       if (meta.kind === 'image') {
-        const mode: DitherMode = meta.dither && meta.dither !== 'inherit' ? meta.dither : prepared.preview.mode
-        stampImage(ctx, obj, mode, prepared.preview.threshold)
+        const chosen: DitherMode = meta.dither && meta.dither !== 'inherit' ? meta.dither : prepared.preview.mode
+        const mode: DitherMode = sharpness === 'strong' ? 'threshold' : chosen
+        const threshold = sharpness === 'strong' ? Math.min(prepared.preview.threshold, 150) : prepared.preview.threshold
+        stampImage(ctx, obj, mode, threshold, sharpness === 'strong')
       } else {
-        stampLine(ctx, obj, prepared.preview.threshold)
+        stampLine(ctx, obj, prepared.preview.threshold, sharpness)
       }
     }
     if (prepared.preview.invert) invert(ctx, width, height)
@@ -75,9 +80,9 @@ function objectCanvas(obj: FabricObject): { element: HTMLCanvasElement; left: nu
   return { element, left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height }
 }
 
-function stampImage(ctx: CanvasRenderingContext2D, obj: FabricObject, mode: DitherMode, threshold: number) {
+function stampImage(ctx: CanvasRenderingContext2D, obj: FabricObject, mode: DitherMode, threshold: number, sharpen: boolean) {
   const { element, left, top, width, height } = objectCanvas(obj)
-  const binary = binarize(element, mode, threshold)
+  const binary = binarize(element, mode, threshold, sharpen)
   const masked = document.createElement('canvas')
   masked.width = element.width
   masked.height = element.height
@@ -89,25 +94,25 @@ function stampImage(ctx: CanvasRenderingContext2D, obj: FabricObject, mode: Dith
   ctx.drawImage(masked, left, top, width, height)
 }
 
-function stampLine(ctx: CanvasRenderingContext2D, obj: FabricObject, threshold: number) {
+function stampLine(ctx: CanvasRenderingContext2D, obj: FabricObject, threshold: number, sharpness: Sharpness) {
   const { element, left, top, width, height } = objectCanvas(obj)
   const source = element.getContext('2d', { willReadFrequently: true })
   if (!source) return
   const pixels = source.getImageData(0, 0, element.width, element.height)
+  const cut = sharpnessCut(sharpness)
+  const luma = new Float32Array(element.width * element.height)
+  for (let pixel = 0, index = 0; pixel < pixels.data.length; pixel += 4, index += 1) {
+    luma[index] = coveredLuma(pixels.data, pixel)
+  }
+  const gray = cut ? sharpenLuma(luma, element.width, element.height, cut.amount) : luma
+  const limit = cut?.threshold ?? threshold
   const out = source.createImageData(element.width, element.height)
-  for (let i = 0; i < pixels.data.length; i += 4) {
-    const alpha = pixels.data[i + 3] ?? 0
-    if (alpha < 128) continue
-    const coverage = alpha / 255
-    const red = (pixels.data[i] ?? 0) * coverage + 255 * (1 - coverage)
-    const green = (pixels.data[i + 1] ?? 0) * coverage + 255 * (1 - coverage)
-    const blue = (pixels.data[i + 2] ?? 0) * coverage + 255 * (1 - coverage)
-    const luma = 0.299 * red + 0.587 * green + 0.114 * blue
-    const value = luma < threshold ? 0 : 255
-    out.data[i] = value
-    out.data[i + 1] = value
-    out.data[i + 2] = value
-    out.data[i + 3] = 255
+  for (let index = 0; index < gray.length; index += 1) {
+    const value = (gray[index] ?? 255) < limit ? 0 : 255
+    out.data[index * 4] = value
+    out.data[index * 4 + 1] = value
+    out.data[index * 4 + 2] = value
+    out.data[index * 4 + 3] = 255
   }
   const tmp = document.createElement('canvas')
   tmp.width = element.width
@@ -116,21 +121,26 @@ function stampLine(ctx: CanvasRenderingContext2D, obj: FabricObject, threshold: 
   ctx.drawImage(tmp, left, top, width, height)
 }
 
-function binarize(source: HTMLCanvasElement, mode: DitherMode, threshold: number): HTMLCanvasElement {
+function coveredLuma(data: Uint8ClampedArray, pixel: number) {
+  const alpha = (data[pixel + 3] ?? 0) / 255
+  const red = (data[pixel] ?? 0) * alpha + 255 * (1 - alpha)
+  const green = (data[pixel + 1] ?? 0) * alpha + 255 * (1 - alpha)
+  const blue = (data[pixel + 2] ?? 0) * alpha + 255 * (1 - alpha)
+  return 0.299 * red + 0.587 * green + 0.114 * blue
+}
+
+function binarize(source: HTMLCanvasElement, mode: DitherMode, threshold: number, sharpen: boolean): HTMLCanvasElement {
   const ctx = source.getContext('2d', { willReadFrequently: true })
   const canvas = document.createElement('canvas')
   canvas.width = source.width
   canvas.height = source.height
   if (!ctx) return canvas
   const pixels = ctx.getImageData(0, 0, source.width, source.height)
-  const luma = new Float32Array(source.width * source.height)
+  const plain = new Float32Array(source.width * source.height)
   for (let pixel = 0, index = 0; pixel < pixels.data.length; pixel += 4, index += 1) {
-    const alpha = (pixels.data[pixel + 3] ?? 0) / 255
-    const red = (pixels.data[pixel] ?? 0) * alpha + 255 * (1 - alpha)
-    const green = (pixels.data[pixel + 1] ?? 0) * alpha + 255 * (1 - alpha)
-    const blue = (pixels.data[pixel + 2] ?? 0) * alpha + 255 * (1 - alpha)
-    luma[index] = 0.299 * red + 0.587 * green + 0.114 * blue
+    plain[index] = coveredLuma(pixels.data, pixel)
   }
+  const luma = sharpen ? sharpenLuma(plain, source.width, source.height, 1.2) : plain
   const bits = ditherLuma(luma, source.width, source.height, mode, threshold)
   const out = ctx.createImageData(source.width, source.height)
   for (let index = 0; index < bits.length; index += 1) {

@@ -1,7 +1,7 @@
 import type { DesignRecord, LabelDocument, TemplateRecord } from '../types'
 
 const DB_NAME = 'metka'
-const DB_VERSION = 1
+const DB_VERSION = 2
 
 type KvRow = { key: string; value: unknown }
 
@@ -13,6 +13,7 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains('templates')) db.createObjectStore('templates', { keyPath: 'id' })
       if (!db.objectStoreNames.contains('designs')) db.createObjectStore('designs', { keyPath: 'id' })
       if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv', { keyPath: 'key' })
+      if (!db.objectStoreNames.contains('fonts')) db.createObjectStore('fonts', { keyPath: 'id' })
     }
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error ?? new Error('indexedDB'))
@@ -27,7 +28,7 @@ function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
 }
 
 async function withStore<T>(
-  name: 'templates' | 'designs' | 'kv',
+  name: 'templates' | 'designs' | 'kv' | 'fonts',
   mode: IDBTransactionMode,
   run: (store: IDBObjectStore) => IDBRequest<T>,
 ): Promise<T> {
@@ -83,4 +84,24 @@ export async function readAutosave(): Promise<{ doc: LabelDocument; designId: st
   const value = row?.value as { doc?: LabelDocument; designId?: string | null } | undefined
   if (!value?.doc) return null
   return { doc: value.doc, designId: value.designId ?? null }
+}
+
+export type StoredFont = {
+  id: string
+  label: string
+  family: string
+  data: ArrayBuffer
+}
+
+export async function listStoredFonts(): Promise<StoredFont[]> {
+  const rows = await withStore('fonts', 'readonly', (store) => store.getAll())
+  return rows as StoredFont[]
+}
+
+export async function saveStoredFont(font: StoredFont): Promise<void> {
+  await withStore('fonts', 'readwrite', (store) => store.put(font))
+}
+
+export async function deleteStoredFont(id: string): Promise<void> {
+  await withStore('fonts', 'readwrite', (store) => store.delete(id))
 }

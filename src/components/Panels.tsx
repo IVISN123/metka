@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import {
   AlignCenter,
   AlignEndVertical,
@@ -30,7 +30,8 @@ import {
 import { engine } from '../engine/editor'
 import { describeEncoded } from '../lib/encode'
 import { ICONS } from '../lib/icons'
-import { BARCODE_FORMATS, DATE_FORMATS, FONTS, metaFor } from '../lib/presets'
+import { addUserFont, fontChoices, isUploadedFamily, removeUserFont, subscribeFonts } from '../lib/fonts'
+import { BARCODE_FORMATS, DATE_FORMATS, metaFor } from '../lib/presets'
 import { renderDocumentThermal } from '../lib/render'
 import { modelLabel } from '../lib/units'
 import type { I18nKey } from '../i18n'
@@ -166,6 +167,7 @@ function LayerRow({ layer, active }: { layer: LayerInfo; active: boolean }) {
 export function Inspector() {
   const { state } = useEngine()
   const { t } = useI18n()
+  const fonts = useSyncExternalStore(subscribeFonts, fontChoices, fontChoices)
   const selected = state.selected
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-auto">
@@ -201,12 +203,45 @@ export function Inspector() {
                 </Field>
                 <Field label={t('font')}>
                   <SelectInput value={selected.fontFamily} onChange={(event) => void engine.updateSelected({ fontFamily: event.target.value })}>
-                    {FONTS.map((font) => (
-                      <option key={font.id} value={font.family}>
+                    {fonts.map((font) => (
+                      <option key={font.id} value={font.family} style={{ fontFamily: font.family }}>
                         {font.label}
                       </option>
                     ))}
+                    {selected.fontFamily && !fonts.some((font) => font.family === selected.fontFamily) && (
+                      <option value={selected.fontFamily}>{selected.fontFamily}</option>
+                    )}
                   </SelectInput>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <label className="inline-flex h-9 cursor-pointer items-center rounded-full border border-[var(--border)] px-3 text-sm font-bold hover:bg-[var(--hover)]">
+                      {t('uploadFont')}
+                      <input
+                        type="file"
+                        accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2"
+                        className="hidden"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0]
+                          event.target.value = ''
+                          if (!file) return
+                          void addUserFont(file)
+                            .then((font) => engine.updateSelected({ fontFamily: font.family }))
+                            .catch((error: unknown) => toast(error instanceof Error && error.message === 'tooBig' ? t('fontTooBig') : t('fontFail')))
+                        }}
+                      />
+                    </label>
+                    {selected.fontFamily && isUploadedFamily(selected.fontFamily) && (
+                      <Button
+                        onClick={() => {
+                          const font = fonts.find((item) => item.family === selected.fontFamily)
+                          if (!font) return
+                          void removeUserFont(font.id).then(() => engine.updateSelected({ fontFamily: '"OpenGOST type A", sans-serif' }))
+                        }}
+                      >
+                        {t('removeFont')}
+                      </Button>
+                    )}
+                  </div>
+                  <span className="mt-1 block text-xs text-[var(--muted)]">{t('fontHint')}</span>
                 </Field>
                 <Field label={t('fontSize')}>
                   <Slider min={8} max={160} value={selected.fontSize ?? 16} onChange={(value) => void engine.updateSelected({ fontSize: value })} />

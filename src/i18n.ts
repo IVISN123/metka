@@ -245,6 +245,16 @@ const ru = {
   copyFail: 'Не удалось скопировать',
   diagNote:
     'Если печать падает с ошибкой 20, прошивка не приняла RFID рулона. Официальное приложение Niimbot отказывает так же: это считыватель или прошивка принтера. Номер прошивки — в строке выше.',
+  sharpness: 'Чёткость печати',
+  sharpOff: 'Как сейчас',
+  sharpClear: 'Чёткий текст',
+  sharpStrong: 'Максимальный контраст',
+  sharpHint: 'Для термопечати, в том числе 300 DPI: серая кайма букв становится чёрной. Фото при максимуме идут жёстким порогом.',
+  uploadFont: 'Свой шрифт',
+  fontHint: 'TTF, OTF, WOFF или WOFF2. Файл остаётся в этом браузере, рядом с шаблонами.',
+  removeFont: 'Удалить шрифт',
+  fontTooBig: 'Шрифт больше 4 МБ',
+  fontFail: 'Этот файл не открылся как шрифт',
 } as const
 
 const en: { [K in keyof typeof ru]: string } = {
@@ -492,6 +502,16 @@ const en: { [K in keyof typeof ru]: string } = {
   copyFail: 'Could not copy',
   diagNote:
     'Error 20 means the firmware rejected the roll RFID. The official Niimbot app refuses the same way: it is the reader or the printer firmware. The firmware number is in the row above.',
+  sharpness: 'Print sharpness',
+  sharpOff: 'As now',
+  sharpClear: 'Crisp text',
+  sharpStrong: 'Maximum contrast',
+  sharpHint: 'For thermal output, including 300 DPI: gray fringes on letters become black. Photos use a hard threshold at maximum.',
+  uploadFont: 'Upload font',
+  fontHint: 'TTF, OTF, WOFF, or WOFF2. The file stays in this browser, next to your templates.',
+  removeFont: 'Remove font',
+  fontTooBig: 'Font is larger than 4 MB',
+  fontFail: 'This file did not open as a font',
 }
 
 export type I18nKey = keyof typeof ru

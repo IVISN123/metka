@@ -22,6 +22,7 @@ import { readMeta, writeMeta } from './meta'
 import { barcodeDataUrl, qrDataUrl } from '../lib/codes'
 import { iconById } from '../lib/icons'
 import { metaFor, suggestedTask } from '../lib/presets'
+import { ensureFontsReady } from '../lib/fonts'
 import { readAutosave } from '../lib/storage'
 import { clamp, formatDate, mmToPx, uid, verticalize } from '../lib/units'
 
@@ -150,6 +151,8 @@ export class EditorEngine {
       } catch {
         saved = null
       }
+      if (token !== this.loadToken || !this.canvas) return
+      await ensureFontsReady()
       if (token !== this.loadToken || !this.canvas) return
       if (saved?.doc) await this.loadDocument(saved.doc, saved.designId, false)
       else await this.loadDocument(await buildBuiltin('drone-strip'), null, false)
