@@ -13,12 +13,14 @@ import {
 } from 'lucide-react'
 import { engine } from '../engine/editor'
 import { parseImport, serializeDesign } from '../lib/bundle'
-import { browserSupport } from '../lib/browser'
+import { browserSupport, printBlockReason } from '../lib/browser'
+import { LabelCodeError } from '../lib/codes'
+import { importErrorKey, noteStorageError, storageErrorCode } from '../lib/errors'
 import { renderDocumentColor, renderDocumentThermal, thumbnailOf } from '../lib/render'
-import { listTemplates, saveDesign, saveTemplate, writeAutosave } from '../lib/storage'
+import { autosaveSignature, listTemplates, saveDesign, saveTemplate, writeAutosave } from '../lib/storage'
 import { MODEL_IDS, PRESETS, matchingPreset, metaFor } from '../lib/presets'
 import { printer } from '../printer/controller'
-import { downloadText, downloadUrl, mmToPx, modelLabel, slug, uid, uniqueName } from '../lib/units'
+import { downloadText, downloadUrl, mmToPx, modelLabel, parseMm, sizeClampNote, slug, uid, uniqueName } from '../lib/units'
 import { toast } from '../toast'
 import type { ThemeName } from '../types'
 import { BatchDialog } from './BatchDialog'
@@ -44,6 +46,28 @@ export function Shell() {
   const [customW, setCustomW] = useState(String(state.widthMm))
   const [customH, setCustomH] = useState(String(state.heightMm))
   const support = browserSupport()
+  const block = printBlockReason(support)
+  const autosaveKey = autosaveSignature({
+    contentRev: state.contentRev,
+    name: state.name,
+    designId: state.designId,
+    ready: state.ready,
+    dirty: state.dirty,
+    quantity: state.quantity,
+    align: state.align,
+    task: state.task,
+    taskAuto: state.taskAuto,
+    labelType: state.labelType,
+    direction: state.direction,
+    density: state.density,
+    pageFrom: state.pageFrom,
+    pageTo: state.pageTo,
+    widthMm: state.widthMm,
+    heightMm: state.heightMm,
+    dpi: state.dpi,
+    model: state.model,
+    preview: state.preview,
+  })
   const menuRef = useRef<HTMLDivElement>(null)
   const preset = matchingPreset(state.widthMm, state.heightMm)
   const pxW = mmToPx(state.widthMm, state.dpi)
@@ -57,10 +81,12 @@ export function Shell() {
   useEffect(() => {
     if (!state.ready) return
     const timer = window.setTimeout(() => {
-      void writeAutosave(engine.toDocument(), state.designId).catch(() => undefined)
+      void writeAutosave(engine.toDocument(), state.designId, state.dirty).catch((error: unknown) => {
+        noteStorageError(error, (code) => toast(t(code === 'quota' ? 'quota' : 'storageFail')))
+      })
     }, 800)
     return () => window.clearTimeout(timer)
-  }, [state.contentRev, state.name, state.designId, state.ready, state.dirty])
+  }, [autosaveKey, state.designId, state.dirty, state.ready, t])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -98,7 +124,8 @@ export function Shell() {
       engine.markClean(id)
       toast(t('saved', { name: doc.name }))
     } catch (error) {
-      toast(error instanceof Error ? error.message : String(error))
+      const code = storageErrorCode(error)
+      toast(code === 'quota' ? t('quota') : t('storageFail'))
     }
   }
 
@@ -108,9 +135,14 @@ export function Shell() {
   }
 
   const exportPng = async (thermal: boolean) => {
-    const doc = engine.toDocument()
-    const canvas = thermal ? await renderDocumentThermal(doc) : await renderDocumentColor(doc)
-    downloadUrl(`${slug(doc.name)}${thermal ? '-1bit' : ''}.png`, canvas.toDataURL('image/png'))
+    try {
+      const doc = engine.toDocument()
+      const canvas = thermal ? await renderDocumentThermal(doc) : await renderDocumentColor(doc)
+      downloadUrl(`${slug(doc.name)}${thermal ? '-1bit' : ''}.png`, canvas.toDataURL('image/png'))
+    } catch (error) {
+      if (error instanceof LabelCodeError) toast(t(error.kind === 'qr' ? 'qrError' : 'barcodeError'))
+      else toast(t('exportFail'))
+    }
   }
 
   const importJson = async (file: File) => {
@@ -138,8 +170,8 @@ export function Shell() {
       }
       toast(t('imported', { n: payload.items.length }))
       setGallery({ tab: 'templates', compose: false })
-    } catch {
-      toast(t('importFail'))
+    } catch (error) {
+      toast(t(importErrorKey(error)))
     }
   }
 
@@ -225,7 +257,17 @@ export function Shell() {
           <div className="absolute right-24 top-14 z-40 w-56 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-1 shadow-xl">
             <MenuItem onClick={() => void exportPng(false)}>{t('exportPng')}</MenuItem>
             <MenuItem onClick={() => void exportPng(true)}>{t('exportBit')}</MenuItem>
-            <MenuItem onClick={exportJson}>{t('exportJson')}</MenuItem>
+            <MenuItem
+              onClick={() => {
+                try {
+                  exportJson()
+                } catch {
+                  toast(t('exportFail'))
+                }
+              }}
+            >
+              {t('exportJson')}
+            </MenuItem>
             <label className="block cursor-pointer rounded-xl px-3 py-2 text-sm font-bold hover:bg-[var(--hover)]">
               {t('importJson')}
               <input
@@ -284,7 +326,14 @@ export function Shell() {
             <div className="mt-2 flex flex-wrap gap-2">
               <Button
                 onClick={() => {
-                  engine.setSize(Number(customW), Number(customH), sizeDpi)
+                  const width = parseMm(customW)
+                  const height = parseMm(customH)
+                  if (width === null || height === null) {
+                    toast(t('badSize'))
+                    return
+                  }
+                  if (sizeClampNote(width, height)) toast(t('sizeClamped'))
+                  engine.setSize(width, height, sizeDpi)
                   setMenu(null)
                 }}
               >
@@ -315,10 +364,12 @@ export function Shell() {
           </div>
         )}
       </header>
-      {(!support.bluetooth || !support.secure) && (
+      {block && (
         <div className="flex items-start gap-2 border-b border-[var(--border)] bg-[var(--elev)] px-3 py-2 text-xs leading-5 text-[var(--muted)]">
           <Bluetooth size={14} className="mt-0.5 shrink-0" />
-          <span>{!support.secure ? t('insecure') : support.ios ? t('browserBannerIos') : t('browserBanner')}</span>
+          <span>
+            {block === 'insecure-ios' ? t('insecureIos') : block === 'insecure' ? t('insecure') : block === 'ios' ? t('browserBannerIos') : t('browserBanner')}
+          </span>
         </div>
       )}
       <div className="flex min-h-0 flex-1">

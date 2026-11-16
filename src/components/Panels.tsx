@@ -33,6 +33,7 @@ import { describeEncoded } from '../lib/encode'
 import { ICONS } from '../lib/icons'
 import { addUserFont, fontChoices, isUploadedFamily, removeUserFont, subscribeFonts } from '../lib/fonts'
 import { BARCODE_FORMATS, DATE_FORMATS, metaFor } from '../lib/presets'
+import { LabelCodeError } from '../lib/codes'
 import { renderDocumentThermal } from '../lib/render'
 import { modelLabel } from '../lib/units'
 import type { I18nKey } from '../i18n'
@@ -457,7 +458,9 @@ function LivePreview({ rev, ready, label, hint }: { rev: number; ready: boolean;
           const axis = doc.direction === 'top' ? thermal.width : thermal.height
           setWarn(meta && axis > meta.printheadPixels ? t('printheadWarn', { model: modelLabel(doc.model), px: meta.printheadPixels }) : '')
         } catch (error) {
-          if (!cancel) setStats(t('encodeFail', { error: error instanceof Error ? error.message : String(error) }))
+          if (cancel) return
+          if (error instanceof LabelCodeError) setStats(t(error.kind === 'qr' ? 'qrError' : 'barcodeError'))
+          else setStats(t('encodeFail', { error: error instanceof Error ? error.message : String(error) }))
         }
       })()
     }, 180)

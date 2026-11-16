@@ -3,6 +3,7 @@ import type { DitherMode, LabelDocument, Meta, Sharpness } from '../types'
 import { ditherLuma, sharpnessCut, sharpenLuma } from './dither'
 import { ensureFontsReady } from './fonts'
 import { materialize } from './materialize'
+import { rasterLimit } from './limits'
 import { mmToPx } from './units'
 
 function readMeta(obj: FabricObject): Meta | undefined {
@@ -76,8 +77,22 @@ export async function renderDocumentThermal(doc: LabelDocument, row?: Record<str
 
 function objectCanvas(obj: FabricObject): { element: HTMLCanvasElement; left: number; top: number; width: number; height: number } {
   const bounds = obj.getBoundingRect()
-  const element = obj.toCanvasElement({ enableRetinaScaling: false })
+  const source = obj.toCanvasElement({ enableRetinaScaling: false })
+  const limit = rasterLimit(source.width, source.height, bounds.width, bounds.height)
+  const element = source.width === limit.width && source.height === limit.height ? source : scaleCanvas(source, limit.width, limit.height)
   return { element, left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height }
+}
+
+function scaleCanvas(source: HTMLCanvasElement, width: number, height: number): HTMLCanvasElement {
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return source
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(source, 0, 0, width, height)
+  return canvas
 }
 
 function stampImage(ctx: CanvasRenderingContext2D, obj: FabricObject, mode: DitherMode, threshold: number, sharpen: boolean) {

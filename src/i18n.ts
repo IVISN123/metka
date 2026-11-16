@@ -197,7 +197,7 @@ const ru = {
   white: 'Белый',
   alignCanvas: 'По этикетке',
   placeholders: 'В тексте, QR и штрихкоде можно писать {{колонка}} — серия и CSV подставят значение.',
-  csvHelp: 'Первая строка — заголовки. Подойдут запятая или точка с запятой.',
+  csvHelp: 'Первая строка — заголовки. Подойдут запятая, точка с запятой и табуляция. Читаются UTF-8 и Windows-1251, пустые ячейки остаются пустыми.',
   rowCount: '{n} строк',
   limit500: 'Серия обрезана до 500 значений',
   barcodeError: 'Штрихкод не собрался: проверьте цифры и формат',
@@ -278,6 +278,21 @@ const ru = {
   flashBadVersion: 'Версия в виде 4.28',
   flashLink: 'Официальные образы D11_H (не наши, скачиваете сами)',
   flashLinkTest: 'Тестовый 4.28 с того же архива',
+  quota: 'Память браузера заполнена. Удалите лишние шаблоны или экспортируйте их и очистите данные сайта.',
+  storageFail: 'Не удалось записать данные в этом браузере.',
+  importTooLarge: 'Файл слишком большой. Уберите лишние фото и попробуйте снова.',
+  importVersion: 'Этот файл сделан другой версией Метки и не открывается.',
+  importSize: 'В файле размер или DPI вне диапазона: 8–120 × 8–200 мм, 96–600 DPI.',
+  importPhoto: 'В файле слишком тяжёлое фото. Уменьшите его и экспортируйте снова.',
+  badSize: 'Введите ширину и высоту в миллиметрах, например 40 и 12.',
+  sizeClamped: 'Размер приведён к допустимому: ширина 8–120 мм, высота 8–200 мм.',
+  linkLost: 'Принтер отключился. Поднесите его ближе и подключитесь снова.',
+  qrError: 'QR не собрался: строка слишком длинная для выбранной коррекции.',
+  exportFail: 'Не удалось сохранить файл.',
+  insecureIos:
+    'Safari на iPhone и iPad не печатает, а эта страница ещё и открыта не по HTTPS. Откройте Метку в Chrome на компьютере или Android по защищённому адресу.',
+  photoTooBig: 'Фото больше 12 МБ. Уменьшите его перед добавлением.',
+  photoFail: 'Это фото не открылось.',
 } as const
 
 const en: { [K in keyof typeof ru]: string } = {
@@ -477,7 +492,7 @@ const en: { [K in keyof typeof ru]: string } = {
   white: 'White',
   alignCanvas: 'On the label',
   placeholders: 'Text, QR and barcodes accept {{column}} — a series or CSV fills it in.',
-  csvHelp: 'The first row is the header. Commas or semicolons both work.',
+  csvHelp: 'The first row is the header. Commas, semicolons, and tabs all work. UTF-8 and Windows-1251 are read, and empty cells stay empty.',
   rowCount: '{n} rows',
   limit500: 'Series capped at 500 values',
   barcodeError: 'Could not build that barcode. Check the digits and format.',
@@ -558,6 +573,21 @@ const en: { [K in keyof typeof ru]: string } = {
   flashBadVersion: 'Version looks like 4.28',
   flashLink: 'Official D11_H images (not ours; you download them)',
   flashLinkTest: 'Testing build 4.28 from that archive',
+  quota: 'This browser is out of storage. Delete extra templates, or export them and clear site data.',
+  storageFail: 'Could not write data in this browser.',
+  importTooLarge: 'That file is too large. Remove extra photos and try again.',
+  importVersion: 'That file was made by a different version of Metka and cannot be opened.',
+  importSize: 'The file’s size or DPI is out of range: 8–120 × 8–200 mm, 96–600 DPI.',
+  importPhoto: 'A photo in that file is too heavy. Shrink it and export again.',
+  badSize: 'Enter the width and height in millimetres, for example 40 and 12.',
+  sizeClamped: 'The size was brought into range: width 8–120 mm, height 8–200 mm.',
+  linkLost: 'The printer disconnected. Move it closer and connect again.',
+  qrError: 'Could not build that QR code. The text is too long for the selected correction.',
+  exportFail: 'Could not save the file.',
+  insecureIos:
+    'Safari on iPhone and iPad cannot print, and this page is not HTTPS. Open Metka in Chrome on a computer or Android over a secure address.',
+  photoTooBig: 'That photo is larger than 12 MB. Shrink it before adding it.',
+  photoFail: 'That photo could not be opened.',
 }
 
 export type I18nKey = keyof typeof ru

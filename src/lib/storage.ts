@@ -1,4 +1,5 @@
-import type { DesignRecord, LabelDocument, TemplateRecord } from '../types'
+import type { DesignRecord, LabelDocument, PreviewSettings, TemplateRecord } from '../types'
+import { normalizeDocument } from './bundle'
 
 const DB_NAME = 'metka'
 const DB_VERSION = 2
@@ -37,9 +38,13 @@ async function withStore<T>(
     const tx = db.transaction(name, mode)
     const done = new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve()
-      tx.onerror = () => reject(tx.error ?? new Error('indexedDB'))
+      tx.onerror = (event) => {
+        event.preventDefault()
+        reject(tx.error ?? new Error('indexedDB'))
+      }
       tx.onabort = () => reject(tx.error ?? new Error('indexedDB'))
     })
+    done.catch(() => undefined)
     const value = await requestToPromise(run(tx.objectStore(name)))
     await done
     return value
@@ -74,16 +79,42 @@ export async function deleteDesign(id: string): Promise<void> {
   await withStore('designs', 'readwrite', (store) => store.delete(id))
 }
 
-export async function writeAutosave(doc: LabelDocument, designId: string | null): Promise<void> {
-  const row: KvRow = { key: 'autosave', value: { doc, designId, savedAt: Date.now() } }
+export async function writeAutosave(doc: LabelDocument, designId: string | null, dirty = false): Promise<void> {
+  const row: KvRow = { key: 'autosave', value: { doc, designId, dirty, savedAt: Date.now() } }
   await withStore('kv', 'readwrite', (store) => store.put(row))
 }
 
-export async function readAutosave(): Promise<{ doc: LabelDocument; designId: string | null } | null> {
+export async function readAutosave(): Promise<{ doc: LabelDocument; designId: string | null; dirty: boolean } | null> {
   const row = (await withStore('kv', 'readonly', (store) => store.get('autosave'))) as KvRow | undefined
-  const value = row?.value as { doc?: LabelDocument; designId?: string | null } | undefined
-  if (!value?.doc) return null
-  return { doc: value.doc, designId: value.designId ?? null }
+  const value = row?.value as { doc?: unknown; designId?: unknown; dirty?: unknown } | undefined
+  if (!value) return null
+  const normalized = normalizeDocument(value.doc, { clamp: true, maxImageChars: null })
+  if (!normalized.ok) return null
+  return { doc: normalized.doc, designId: typeof value.designId === 'string' ? value.designId : null, dirty: value.dirty === true }
+}
+
+export function autosaveSignature(input: {
+  contentRev: number
+  name: string
+  designId: string | null
+  ready: boolean
+  dirty: boolean
+  quantity: number
+  align: string
+  task: string
+  taskAuto: boolean
+  labelType: number
+  direction: string
+  density: number
+  pageFrom: number
+  pageTo: number
+  widthMm: number
+  heightMm: number
+  dpi: number
+  model: string
+  preview: PreviewSettings
+}): string {
+  return JSON.stringify(input)
 }
 
 export type StoredFont = {

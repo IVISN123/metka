@@ -15,12 +15,45 @@ export function padAxis(
   printhead: number | undefined,
   align: AlignMode,
 ): { offset: number; size: number; overflows: boolean } {
-  if (!printhead || printhead <= 0 || content >= printhead) {
-    return { offset: 0, size: content, overflows: !!printhead && content > printhead }
-  }
-  const extra = printhead - content
+  const head = printhead && Number.isFinite(printhead) && printhead > 0 ? Math.round(printhead) : 0
+  if (!Number.isFinite(content) || content <= 0) return { offset: 0, size: Math.max(1, head || 1), overflows: false }
+  const length = Math.max(1, Math.round(content))
+  if (!head || length >= head) return { offset: 0, size: length, overflows: !!head && length > head }
+  const extra = head - length
   const offset = align === 'center' ? Math.floor(extra / 2) : align === 'end' ? extra : 0
-  return { offset, size: printhead, overflows: false }
+  return { offset, size: head, overflows: false }
+}
+
+export function parseMm(value: string): number | null {
+  const text = value.trim().replace(',', '.')
+  if (!/^[+-]?(?:\d+|\d+\.\d+|\.\d+)$/.test(text)) return null
+  const number = Number(text)
+  return Number.isFinite(number) ? number : null
+}
+
+export function clampSize(widthMm: number, heightMm: number, dpi: number): { widthMm: number; heightMm: number; dpi: number } {
+  return {
+    widthMm: clamp(Number.isFinite(widthMm) ? widthMm : 40, 8, 120),
+    heightMm: clamp(Number.isFinite(heightMm) ? heightMm : 12, 8, 200),
+    dpi: clamp(Number.isFinite(dpi) ? Math.round(dpi) : 203, 96, 600),
+  }
+}
+
+export function sizeClampNote(widthMm: number, heightMm: number): 'small' | 'large' | null {
+  if (!Number.isFinite(widthMm) || !Number.isFinite(heightMm)) return null
+  if (widthMm < 8 || heightMm < 8) return 'small'
+  if (widthMm > 120 || heightMm > 200) return 'large'
+  return null
+}
+
+export function clampCopies(value: number): number | null {
+  if (!Number.isFinite(value)) return null
+  return clamp(Math.round(value), 1, 200)
+}
+
+export function clampDpi(value: number): number | null {
+  if (!Number.isFinite(value)) return null
+  return clamp(Math.round(value), 96, 600)
 }
 
 export function uid(): string {
@@ -58,7 +91,20 @@ export function formatDate(format: string, date = new Date()): string {
 
 export function fillTemplate(text: string, row?: Record<string, string>): string {
   if (!row) return text
-  return text.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_, key: string) => row[key.trim()] ?? '')
+  const keys = Object.keys(row)
+  return text.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_, raw: string) => {
+    const key = raw.trim().normalize('NFC')
+    if (Object.prototype.hasOwnProperty.call(row, key)) return row[key] ?? ''
+    const folded = key.toLocaleLowerCase('ru')
+    const match = keys.filter((item) => item.normalize('NFC').toLocaleLowerCase('ru') === folded)
+    return match.length === 1 ? (row[match[0]!] ?? '') : ''
+  })
+}
+
+export function localDateStamp(date = new Date()): string {
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}-${month}-${day}`
 }
 
 export function modelLabel(id: string): string {
@@ -72,7 +118,10 @@ export function downloadUrl(filename: string, href: string) {
   const link = document.createElement('a')
   link.href = href
   link.download = filename
+  link.rel = 'noopener'
+  document.body.appendChild(link)
   link.click()
+  link.remove()
 }
 
 export function downloadText(filename: string, text: string, type = 'application/json') {
