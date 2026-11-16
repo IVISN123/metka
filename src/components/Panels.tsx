@@ -38,7 +38,9 @@ import { describeEncoded } from '../lib/encode'
 import { FontPicker } from './FontPicker'
 import { IconLibrary } from './IconLibrary'
 import { addUserFont, fontChoices, isUploadedFamily, removeUserFont, subscribeFonts } from '../lib/fonts'
-import { BARCODE_FORMATS, DATE_FORMATS, metaFor } from '../lib/presets'
+import { DATE_FORMATS, metaFor } from '../lib/presets'
+import { worstScan } from '../lib/vector-code'
+import { CodeFields } from './CodeProps'
 import { LabelCodeError } from '../lib/codes'
 import { renderDocumentThermal } from '../lib/render'
 import { modelLabel } from '../lib/units'
@@ -360,42 +362,7 @@ export function Inspector() {
                 </Field>
               </>
             )}
-            {(selected.kind === 'qr' || selected.kind === 'barcode') && (
-              <Field label={t('value')}>
-                <TextInput
-                  value={selected.value ?? ''}
-                  onChange={(event) =>
-                    void engine.updateSelected({ value: event.target.value }).catch(() => toast(t('barcodeError')))
-                  }
-                />
-              </Field>
-            )}
-            {selected.kind === 'barcode' && (
-              <>
-                <Field label={t('format')}>
-                  <SelectInput
-                    value={selected.symbology}
-                    onChange={(event) => void engine.updateSelected({ symbology: event.target.value }).catch(() => toast(t('barcodeError')))}
-                  >
-                    {BARCODE_FORMATS.map((format) => (
-                      <option key={format}>{format}</option>
-                    ))}
-                  </SelectInput>
-                </Field>
-                <CheckRow checked={selected.showText !== false} onChange={(showText) => void engine.updateSelected({ showText }).catch(() => toast(t('barcodeError')))}>
-                  {t('showText')}
-                </CheckRow>
-              </>
-            )}
-            {selected.kind === 'qr' && (
-              <Field label={t('ecl')}>
-                <SelectInput value={selected.ecl ?? 'M'} onChange={(event) => void engine.updateSelected({ ecl: event.target.value as 'M' })}>
-                  {['L', 'M', 'Q', 'H'].map((level) => (
-                    <option key={level}>{level}</option>
-                  ))}
-                </SelectInput>
-              </Field>
-            )}
+            {(selected.kind === 'qr' || selected.kind === 'barcode') && <CodeFields selected={selected} />}
             {(selected.kind === 'shape' || selected.kind === 'text' || selected.kind === 'icon') && (
               <>
                 <Swatches label={t('fill')} value={selected.fill} onChange={(fill) => void engine.updateSelected({ fill })} />
@@ -504,7 +471,11 @@ function LivePreview({ rev, ready, label, hint }: { rev: number; ready: boolean;
           setStats(t('encodeStats', { cols: info.cols, rows: info.rows, black: info.black }))
           const meta = metaFor(doc.model)
           const axis = doc.direction === 'top' ? thermal.width : thermal.height
-          setWarn(meta && axis > meta.printheadPixels ? t('printheadWarn', { model: modelLabel(doc.model), px: meta.printheadPixels }) : '')
+          const head = meta && axis > meta.printheadPixels ? t('printheadWarn', { model: modelLabel(doc.model), px: meta.printheadPixels }) : ''
+          const scan = worstScan(doc.canvas)
+          const code =
+            scan?.level === 'dense' ? t('scanDense') : scan?.level === 'small' ? t('scanSmall', { n: scan.moduleDots }) : scan?.level === 'bars' ? t('scanBars', { n: scan.barDots }) : ''
+          setWarn([head, code].filter(Boolean).join(' '))
         } catch (error) {
           if (cancel) return
           if (error instanceof LabelCodeError) setStats(t(error.kind === 'qr' ? 'qrError' : 'barcodeError'))
