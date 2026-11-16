@@ -1,5 +1,6 @@
 import type { LabelDocument, Meta } from '../types'
-import { barcodeDataUrl, qrDataUrl } from './codes'
+import { LabelCodeError, barcodeDataUrl, barcodeProblem, qrDataUrl, qrProblem } from './codes'
+import { assertCode, isVectorCodeJson, specFromMeta } from './vector-code'
 import { formatPageLabel } from './pages'
 import { fillTemplate, formatDate, verticalize } from './units'
 
@@ -60,16 +61,25 @@ export async function materialize(
       const formatted = meta.live === false ? (meta.sourceText ?? formatDate(meta.dateFormat ?? 'DD.MM.YYYY', now)) : formatDate(meta.dateFormat ?? 'DD.MM.YYYY', now)
       const raw = fillTemplate(formatted, row)
       obj.text = meta.vertical ? verticalize(raw) : raw
-    } else if (meta.kind === 'qr') {
+    } else if (meta.kind === 'qr' || meta.kind === 'barcode') {
       const value = fillTemplate(meta.value ?? '', row)
-      jobs.push(async () => {
-        obj.src = await qrDataUrl(value, meta.ecl ?? 'M')
-      })
-    } else if (meta.kind === 'barcode') {
-      const value = fillTemplate(meta.value ?? '', row)
-      jobs.push(() => {
-        obj.src = barcodeDataUrl(value, meta.symbology ?? 'CODE128', meta.showText !== false)
-      })
+      if (isVectorCodeJson(obj)) {
+        meta.value = value
+        obj.data = meta
+        const spec = specFromMeta(meta)
+        if (!spec) return
+        if (spec.kind === 'qr' && qrProblem(value || ' ', spec.ecl)) throw new LabelCodeError('qr')
+        if (spec.kind === 'barcode' && barcodeProblem(value, spec.symbology)) throw new LabelCodeError('barcode')
+        assertCode(spec)
+      } else if (meta.kind === 'qr') {
+        jobs.push(async () => {
+          obj.src = await qrDataUrl(value, meta.ecl ?? 'M')
+        })
+      } else {
+        jobs.push(() => {
+          obj.src = barcodeDataUrl(value, meta.symbology ?? 'CODE128', meta.showText !== false)
+        })
+      }
     }
   })
   for (const job of jobs) await job()

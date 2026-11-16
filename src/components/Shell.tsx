@@ -17,7 +17,7 @@ import { parseImport, serializeDesign } from '../lib/bundle'
 import { browserSupport, printBlockReason } from '../lib/browser'
 import { LabelCodeError } from '../lib/codes'
 import { importErrorKey, noteStorageError, storageErrorCode } from '../lib/errors'
-import { renderDocumentColor, renderDocumentThermal, thumbnailOf } from '../lib/render'
+import { renderDocumentColor, renderDocumentSvg, renderDocumentThermal, thumbnailOf } from '../lib/render'
 import { autosaveSignature, listTemplates, saveDesign, saveTemplate, writeAutosave } from '../lib/storage'
 import { MODEL_IDS, directionOf, matchingPreset, metaFor, presetSections } from '../lib/presets'
 import { labelsRemaining, suggestionFromRfid } from '../lib/printer-profile'
@@ -203,6 +203,16 @@ export function Shell() {
     }
   }
 
+  const exportSvg = async () => {
+    try {
+      const doc = engine.toDocument()
+      downloadText(`${slug(doc.name)}.svg`, await renderDocumentSvg(doc), 'image/svg+xml')
+    } catch (error) {
+      if (error instanceof LabelCodeError) toast(t(error.kind === 'qr' ? 'qrError' : 'barcodeError'))
+      else toast(t('exportFail'))
+    }
+  }
+
   const importJson = async (file: File) => {
     try {
       const payload = parseImport(await file.text())
@@ -321,6 +331,7 @@ export function Shell() {
             </MenuItem>
             <MenuItem onClick={() => void exportPng(false)}>{t('exportPng')}</MenuItem>
             <MenuItem onClick={() => void exportPng(true)}>{t('exportBit')}</MenuItem>
+            <MenuItem onClick={() => void exportSvg()}>{t('exportSvg')}</MenuItem>
             <MenuItem
               onClick={() => {
                 try {
