@@ -8,6 +8,29 @@ export type Sharpness = 'off' | 'clear' | 'strong'
 export type ObjectKind = 'text' | 'image' | 'icon' | 'shape' | 'barcode' | 'qr' | 'datetime' | 'number' | 'paper' | 'group'
 export type TextMode = 'auto' | 'auto-height' | 'fixed'
 export type StrokeAlign = 'center' | 'inside' | 'outside'
+export type QrContentKind = 'text' | 'wifi' | 'vcard' | 'phone' | 'sms' | 'email' | 'geo'
+export type ModuleShape = 'square' | 'rounded' | 'dots'
+export type FinderShape = 'square' | 'rounded' | 'circle'
+export type WifiAuth = 'WPA' | 'WEP' | 'nopass'
+
+/** Design options for a vector QR or barcode. The encoded string stays in `value`. */
+export type CodeMark = {
+  qrKind?: QrContentKind
+  quiet?: number
+  moduleShape?: ModuleShape
+  finderShape?: FinderShape
+  logoId?: string
+  wifi?: { ssid?: string; password?: string; auth?: WifiAuth; hidden?: boolean }
+  contact?: { name?: string; phone?: string; email?: string; org?: string }
+  phone?: string
+  sms?: { number?: string; body?: string }
+  email?: { to?: string; subject?: string; body?: string }
+  geo?: { lat?: string; lng?: string }
+  barFont?: string
+  barFontSize?: number
+  barHeight?: number
+  moduleDots?: number
+}
 
 export type PreviewSettings = {
   mode: DitherMode
@@ -30,6 +53,7 @@ export type Meta = {
   symbology?: string
   showText?: boolean
   ecl?: 'L' | 'M' | 'Q' | 'H'
+  mark?: CodeMark
   dateFormat?: string
   live?: boolean
   iconId?: string
@@ -117,6 +141,10 @@ export type SelectedInfo = {
   symbology?: string
   showText?: boolean
   ecl?: 'L' | 'M' | 'Q' | 'H'
+  mark?: CodeMark
+  /** Printer-pixel box of a vector code. Transforms write width and height; the code redraws into this box. */
+  boxW?: number
+  boxH?: number
   dateFormat?: string
   live?: boolean
   rx?: number

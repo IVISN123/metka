@@ -1,5 +1,6 @@
 import { Control, controlsUtils, Rect, type FabricObject, type TPointerEvent, type Transform } from 'fabric'
 import { readMeta, writeMeta } from './meta'
+import { isVectorCode } from './vector-object'
 import { isVectorShape, vectorOf } from '../lib/scene-paint'
 import {
   bakeShapeScale,
@@ -61,6 +62,30 @@ function resizeVector(event: TPointerEvent, transform: Transform, x: number, y: 
 }
 
 const vectorResize = controlsUtils.wrapWithFireEvent('resizing', controlsUtils.wrapWithFixedAnchor(resizeVector))
+
+function resizeCode(event: TPointerEvent, transform: Transform, x: number, y: number) {
+  const target = transform.target
+  if (!isVectorCode(target)) return false
+  const local = controlsUtils.getLocalPoint(transform, transform.originX, transform.originY, x, y)
+  const next = resizeDimensions({
+    localX: local.x,
+    localY: local.y,
+    originX: originOffset(transform.originX),
+    originY: originOffset(transform.originY),
+    width: target.width || 1,
+    height: target.height || 1,
+    scaleX: target.scaleX || 1,
+    scaleY: target.scaleY || 1,
+    proportional: 'shiftKey' in event && event.shiftKey,
+    centered: originOffset(transform.originX) === 0 && originOffset(transform.originY) === 0,
+    axes: axesOf(transform.corner),
+  })
+  if (!next) return false
+  target.setBox(next.width, next.height)
+  return true
+}
+
+const codeResize = controlsUtils.wrapWithFireEvent('resizing', controlsUtils.wrapWithFixedAnchor(resizeCode))
 
 type TextSnap = { width: number; height: number; fontSize: number }
 
@@ -195,6 +220,16 @@ export function styleObject(target: FabricObject) {
     padding: 0,
     lockScalingFlip: true,
   })
+  if (isVectorCode(target)) {
+    const controls = controlsUtils.createObjectDefaultControls()
+    for (const key of ['ml', 'mr', 'mt', 'mb', 'tl', 'tr', 'bl', 'br'] as const) {
+      const control = controls[key]
+      control.actionHandler = codeResize
+      control.actionName = 'resizing'
+    }
+    target.controls = withRotation(controls)
+    return
+  }
   if (isVectorShape(target) && vectorOf(target) !== 'line') {
     const controls = controlsUtils.createObjectDefaultControls()
     for (const key of ['ml', 'mr', 'mt', 'mb', 'tl', 'tr', 'bl', 'br'] as const) {

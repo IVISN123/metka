@@ -1,9 +1,10 @@
 import './setup'
 import { FabricImage, Group, StaticCanvas, Textbox, loadSVGFromString, type FabricObject } from 'fabric'
-import type { LabelDocument } from '../types'
-import { barcodeDataUrl, qrDataUrl } from '../lib/codes'
+import type { LabelDocument, Meta } from '../types'
 import { gimbalDataUrl } from '../lib/gimbal'
 import { iconById, symbolSvg } from '../lib/icons'
+import { defaultMark } from '../lib/vector-code'
+import { VectorCode } from './vector-object'
 import { directionOf, metaFor, suggestedTask } from '../lib/presets'
 import { mmToPx, uid } from '../lib/units'
 
@@ -112,18 +113,7 @@ async function paintStrip(scene: StaticCanvas, width: number, height: number) {
     }),
   )
   await addLaurel(scene, width * 0.7, height / 2, height * 0.82, true)
-  const qr = await FabricImage.fromURL(await qrDataUrl('SN-0001', 'M'))
-  const qrScale = (height * 0.78) / (qr.height || 1)
-  qr.set({
-    originX: 'center',
-    originY: 'center',
-    left: width * 0.88,
-    top: height / 2,
-    scaleX: qrScale,
-    scaleY: qrScale,
-    data: { id: uid(), kind: 'qr', name: 'QR', value: 'SN-0001', ecl: 'M' },
-  })
-  scene.add(qr)
+  addVector(scene, qrMeta('QR'), width * 0.88, height / 2, height * 0.78, height * 0.78, 'center')
 }
 
 async function paintCard(scene: StaticCanvas, width: number, height: number) {
@@ -166,18 +156,7 @@ async function paintCard(scene: StaticCanvas, width: number, height: number) {
       data: { id: uid(), kind: 'text', name: 'Название', sourceText: 'GIMBAL', vertical: false },
     }),
   )
-  const qr = await FabricImage.fromURL(await qrDataUrl('SN-0001', 'M'))
-  const qrScale = (height * 0.42) / (qr.height || 1)
-  qr.set({
-    originX: 'center',
-    originY: 'center',
-    left: width * 0.86,
-    top: height / 2,
-    scaleX: qrScale,
-    scaleY: qrScale,
-    data: { id: uid(), kind: 'qr', name: 'QR', value: 'SN-0001', ecl: 'M' },
-  })
-  scene.add(qr)
+  addVector(scene, qrMeta('QR'), width * 0.86, height / 2, height * 0.42, height * 0.42, 'center')
 }
 
 function paintCable(scene: StaticCanvas, width: number, height: number) {
@@ -228,31 +207,34 @@ async function paintStock(scene: StaticCanvas, width: number, height: number) {
       data: { id: uid(), kind: 'datetime', name: 'Дата', sourceText: stamp, dateFormat: 'DD.MM.YYYY', live: true, vertical: false },
     }),
   )
-  const code = barcodeDataUrl('SN-0001', 'CODE128', true)
-  const barcode = await FabricImage.fromURL(code)
-  const scale = Math.min((width * 0.55) / (barcode.width || 1), (height * 0.28) / (barcode.height || 1))
-  barcode.set({
-    originX: 'left',
-    originY: 'center',
-    left: width * 0.06,
-    top: height * 0.72,
-    scaleX: scale,
-    scaleY: scale,
-    data: { id: uid(), kind: 'barcode', name: 'Штрихкод', value: 'SN-0001', symbology: 'CODE128', showText: true },
-  })
-  scene.add(barcode)
-  const qr = await FabricImage.fromURL(await qrDataUrl('SN-0001', 'M'))
-  const qrScale = (height * 0.46) / (qr.height || 1)
-  qr.set({
-    originX: 'center',
-    originY: 'center',
-    left: width * 0.82,
-    top: height * 0.55,
-    scaleX: qrScale,
-    scaleY: qrScale,
-    data: { id: uid(), kind: 'qr', name: 'QR', value: 'SN-0001', ecl: 'M' },
-  })
-  scene.add(qr)
+  addVector(
+    scene,
+    { id: uid(), kind: 'barcode', name: 'Штрихкод', value: 'SN-0001', symbology: 'CODE128', showText: true, mark: defaultMark('barcode') },
+    width * 0.06,
+    height * 0.72,
+    width * 0.55,
+    height * 0.28,
+    'left',
+  )
+  addVector(scene, qrMeta('QR'), width * 0.82, height * 0.55, height * 0.46, height * 0.46, 'center')
+}
+
+function qrMeta(name: string): Meta {
+  return { id: uid(), kind: 'qr', name, value: 'SN-0001', ecl: 'M', mark: defaultMark('qr') }
+}
+
+function addVector(scene: StaticCanvas, data: Meta, left: number, top: number, width: number, height: number, originX: 'center' | 'left') {
+  scene.add(
+    new VectorCode({
+      originX,
+      originY: 'center',
+      left,
+      top,
+      width: Math.max(8, Math.round(width)),
+      height: Math.max(8, Math.round(height)),
+      data,
+    }),
+  )
 }
 
 async function addLaurel(scene: StaticCanvas, left: number, top: number, target: number, flip: boolean) {

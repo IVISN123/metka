@@ -1,4 +1,5 @@
 import type { LabelDocument, PreviewSettings, TemplateRecord } from '../types'
+import { migrateCodeCanvas } from './vector-code'
 
 export type IncomingTemplate = {
   name: string
@@ -64,7 +65,7 @@ export function normalizeDocument(
     task: typeof raw.task === 'string' && raw.task ? raw.task : 'D110',
     taskAuto: raw.taskAuto !== false,
     preview: previewOf(raw.preview),
-    canvas: raw.canvas as Record<string, unknown>,
+    canvas: migrateCodeCanvas(raw.canvas as Record<string, unknown>),
   }
   const pageFrom = optionalNumber(raw, 'pageFrom')
   const pageTo = optionalNumber(raw, 'pageTo')

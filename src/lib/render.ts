@@ -1,4 +1,5 @@
 import { StaticCanvas, type FabricObject } from 'fabric'
+import { isVectorCode, paintCrispCode } from '../engine/vector-object'
 import type { DitherMode, LabelDocument, Meta, Sharpness } from '../types'
 import { ditherLuma, sharpnessCut, sharpenLuma } from './dither'
 import { ensureFontsReady } from './fonts'
@@ -41,8 +42,37 @@ export async function renderDocumentColor(
   const height = mmToPx(prepared.heightMm, prepared.dpi)
   const canvas = await loadScene(prepared, width, height, '#ffffff')
   try {
+    const codes = canvas.getObjects().filter((obj) => isVectorCode(obj) && obj.visible !== false)
+    for (const code of codes) code.visible = false
     canvas.renderAll()
-    return canvas.toCanvasElement(1, { left: 0, top: 0, width, height })
+    const shot = canvas.toCanvasElement(1, { left: 0, top: 0, width, height })
+    for (const code of codes) code.visible = true
+    const out = document.createElement('canvas')
+    out.width = width
+    out.height = height
+    const ctx = out.getContext('2d')
+    if (!ctx) return shot
+    ctx.imageSmoothingEnabled = false
+    ctx.drawImage(shot, 0, 0)
+    for (const code of codes) paintCrispCode(ctx, code)
+    return out
+  } finally {
+    canvas.dispose()
+  }
+}
+
+export async function renderDocumentSvg(doc: LabelDocument, row?: Record<string, string>, now = new Date(), pageNumber?: number): Promise<string> {
+  await ensureFontsReady()
+  const prepared = await materialize(doc, row, now, pageNumber)
+  const width = mmToPx(prepared.widthMm, prepared.dpi)
+  const height = mmToPx(prepared.heightMm, prepared.dpi)
+  const canvas = await loadScene(prepared, width, height, '#ffffff')
+  try {
+    return canvas.toSVG({
+      width: `${width}`,
+      height: `${height}`,
+      viewBox: { x: 0, y: 0, width, height },
+    })
   } finally {
     canvas.dispose()
   }
@@ -68,6 +98,10 @@ export async function renderDocumentThermal(doc: LabelDocument, row?: Record<str
       const meta = readMeta(obj)
       if (!meta || meta.kind === 'paper' || obj.visible === false) continue
       obj.setCoords()
+      if (isVectorCode(obj)) {
+        paintCrispCode(ctx, obj)
+        continue
+      }
       if (meta.kind === 'image') {
         const chosen: DitherMode = meta.dither && meta.dither !== 'inherit' ? meta.dither : prepared.preview.mode
         const mode: DitherMode = sharpness === 'strong' ? 'threshold' : chosen

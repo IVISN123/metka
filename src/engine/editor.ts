@@ -15,13 +15,15 @@ import {
   util,
   type FabricObject,
 } from 'fabric'
-import type { AlignMode, DitherChoice, EditorState, LabelDocument, Lang, PreviewSettings, PrintDirection, SelectedInfo } from '../types'
+import type { AlignMode, DitherChoice, EditorState, LabelDocument, Lang, Meta, PreviewSettings, PrintDirection, SelectedInfo } from '../types'
 import { initialEditorState } from '../types'
 import { buildBuiltin } from './builtins'
 import { readMeta, writeMeta } from './meta'
 import { translate } from '../i18n'
 import { normalizeDocument } from '../lib/bundle'
 import { barcodeDataUrl, qrDataUrl } from '../lib/codes'
+import { assertCode, barcodePixelSize, defaultMark, encodeQrPayload, mergeMark, specFromMeta } from '../lib/vector-code'
+import { VectorCode, isVectorCode } from './vector-object'
 import { iconById, symbolSvg } from '../lib/icons'
 import { MAX_PHOTO_BYTES, MAX_PHOTO_EDGE, historyDepth, targetPhotoSize } from '../lib/limits'
 import { formatPageLabel, parsePageRange } from '../lib/pages'
@@ -254,6 +256,10 @@ export class EditorEngine {
       noteTextGesture(target)
       const corner = opt.transform?.corner
       if (!corner || corner === 'mtr' || corner.startsWith('rot')) return
+      if (isVectorCode(target) && ((target.scaleX ?? 1) !== 1 || (target.scaleY ?? 1) !== 1)) {
+        target.setBox(Math.abs((target.width || 1) * (target.scaleX || 1)), Math.abs((target.height || 1) * (target.scaleY || 1)))
+        return
+      }
       if (vectorOf(target) && vectorOf(target) !== 'line') bakeVectorInPlace(target)
     })
     canvas.on('object:modified', () => this.finishTransform())
@@ -538,6 +544,12 @@ export class EditorEngine {
         this.normalizeText(obj)
         continue
       }
+      if (isVectorCode(obj)) {
+        if ((obj.scaleX ?? 1) !== 1 || (obj.scaleY ?? 1) !== 1) {
+          obj.setBox(Math.abs((obj.width || 1) * (obj.scaleX || 1)), Math.abs((obj.height || 1) * (obj.scaleY || 1)))
+        }
+        continue
+      }
       if (vectorOf(obj) && ((obj.scaleX ?? 1) !== 1 || (obj.scaleY ?? 1) !== 1)) bakeVectorInPlace(obj)
     }
   }
@@ -737,36 +749,37 @@ export class EditorEngine {
 
   async addBarcode() {
     const value = 'SN-0001'
-    const image = await FabricImage.fromURL(barcodeDataUrl(value, 'CODE128', true))
-    const scale = Math.min(this.pxW * 0.7 / (image.width || 1), this.pxH * 0.7 / (image.height || 1), 2)
+    const mark = defaultMark('barcode')
+    const meta = { id: uid(), kind: 'barcode' as const, name: this.named('barcode'), value, symbology: 'CODE128', showText: true, mark }
+    const spec = specFromMeta(meta)
+    const natural = spec ? barcodePixelSize(spec, mark.moduleDots ?? 2, mark.barHeight ?? 56) : { width: 160, height: 70 }
     const center = this.viewCenter()
-    image.set({
+    const code = new VectorCode({
       originX: 'center',
       originY: 'center',
       left: center.x,
       top: center.y,
-      scaleX: scale,
-      scaleY: scale,
-      data: { id: uid(), kind: 'barcode', name: this.named('barcode'), value, symbology: 'CODE128', showText: true },
+      width: Math.max(24, Math.min(natural.width, Math.round(this.pxW * 0.86))),
+      height: Math.max(16, Math.min(natural.height, Math.round(this.pxH * 0.72))),
+      data: meta,
     })
-    this.place(image)
+    this.place(code)
   }
 
   async addQr() {
     const value = 'SN-0001'
-    const image = await FabricImage.fromURL(await qrDataUrl(value, 'M'))
-    const scale = Math.min(this.pxW, this.pxH) * 0.7 / (image.width || 1)
+    const side = Math.max(48, Math.round(Math.min(this.pxW, this.pxH) * 0.72))
     const center = this.viewCenter()
-    image.set({
+    const code = new VectorCode({
       originX: 'center',
       originY: 'center',
       left: center.x,
       top: center.y,
-      scaleX: scale,
-      scaleY: scale,
-      data: { id: uid(), kind: 'qr', name: this.named('qr'), value, ecl: 'M' },
+      width: side,
+      height: side,
+      data: { id: uid(), kind: 'qr', name: this.named('qr'), value, ecl: 'M', mark: defaultMark('qr') },
     })
-    this.place(image)
+    this.place(code)
   }
 
   addDatetime() {
@@ -792,6 +805,10 @@ export class EditorEngine {
     const obj = this.single()
     if (!obj) return
     const meta = { ...(readMeta(obj) ?? { id: uid(), kind: 'shape' as const, name: '' }) }
+    if (isVectorCode(obj) && (meta.kind === 'qr' || meta.kind === 'barcode')) {
+      this.updateVector(obj, meta, patch)
+      return
+    }
     const nextValue = patch.value !== undefined ? patch.value : meta.value
     const nextSym = patch.symbology !== undefined ? patch.symbology : meta.symbology
     const nextShow = patch.showText !== undefined ? patch.showText : meta.showText
@@ -868,6 +885,47 @@ export class EditorEngine {
     writeMeta(obj, meta)
     if (meta.kind === 'image' && fabricType(obj) === 'image') this.applyFilters(obj as FabricImage, meta)
     if (raster) await this.replaceRaster(obj, raster)
+    obj.setCoords()
+    this.canvas?.requestRenderAll()
+    this.syncSelection()
+    this.pushHistory()
+  }
+
+  private updateVector(obj: VectorCode, meta: Meta, patch: Partial<SelectedInfo>) {
+    if (patch.name !== undefined) meta.name = patch.name
+    if (patch.angle !== undefined) obj.set('angle', patch.angle)
+    if (patch.opacity !== undefined) obj.set('opacity', patch.opacity)
+    if (patch.mark) meta.mark = mergeMark(meta.mark, patch.mark)
+    if (patch.value !== undefined) meta.value = patch.value
+    if (patch.symbology !== undefined) meta.symbology = patch.symbology
+    if (patch.showText !== undefined) meta.showText = patch.showText
+    if (patch.ecl !== undefined) meta.ecl = patch.ecl
+    if (patch.invert !== undefined) meta.invert = patch.invert
+    if (!meta.mark) meta.mark = defaultMark(meta.kind === 'barcode' ? 'barcode' : 'qr')
+    if (meta.kind === 'qr' && (meta.mark.qrKind ?? 'text') !== 'text') meta.value = encodeQrPayload(meta.mark, meta.value ?? '')
+    const spec = specFromMeta(meta)
+    if (!spec) return
+    assertCode(spec)
+    if (meta.kind === 'barcode') {
+      const relayout =
+        patch.mark?.moduleDots !== undefined ||
+        patch.mark?.barHeight !== undefined ||
+        patch.mark?.barFontSize !== undefined ||
+        patch.showText !== undefined ||
+        patch.symbology !== undefined ||
+        patch.value !== undefined
+      if (relayout) {
+        const probe = barcodePixelSize(spec, 1, meta.mark.barHeight ?? 56)
+        const moduleDots = patch.mark?.moduleDots ?? Math.max(1, Math.floor(obj.getScaledWidth() / probe.width))
+        const barHeight = patch.mark?.barHeight ?? meta.mark.barHeight ?? 56
+        meta.mark = { ...meta.mark, moduleDots, barHeight }
+        const box = barcodePixelSize(spec, moduleDots, barHeight)
+        obj.setBox(box.width, box.height)
+      }
+    }
+    writeMeta(obj, meta)
+    obj.objectCaching = false
+    obj.dirty = true
     obj.setCoords()
     this.canvas?.requestRenderAll()
     this.syncSelection()
@@ -1201,6 +1259,10 @@ export class EditorEngine {
       h: patch.hMm !== undefined && Number.isFinite(patch.hMm) ? Math.max(1, mmToPx(Math.max(0.2, patch.hMm), dpi)) : Math.max(1, current.h),
     }
     const position = originPoint(next.x, next.y, next.w, next.h, obj.originX, obj.originY)
+    if (isVectorCode(obj)) {
+      obj.setBox(next.w, next.h)
+      obj.set(position)
+    } else {
     const kind = vectorOf(obj)
     if (kind && kind !== 'line') {
       bakeVectorInPlace(obj)
@@ -1227,6 +1289,7 @@ export class EditorEngine {
         scaleY: ((obj.scaleY ?? 1) < 0 ? -1 : 1) * (next.h / baseH),
         ...position,
       })
+    }
     }
     obj.setCoords()
     this.canvas.requestRenderAll()
@@ -1361,6 +1424,13 @@ export class EditorEngine {
     const scale = dpi / previous
     if (scale !== 1) {
       for (const obj of this.userObjects()) {
+        if (isVectorCode(obj)) {
+          const width = Math.abs((obj.width || 1) * (obj.scaleX || 1) * scale)
+          const height = Math.abs((obj.height || 1) * (obj.scaleY || 1) * scale)
+          obj.set({ left: (obj.left ?? 0) * scale, top: (obj.top ?? 0) * scale })
+          obj.setBox(width, height)
+          continue
+        }
         obj.set({
           left: (obj.left ?? 0) * scale,
           top: (obj.top ?? 0) * scale,
@@ -2068,6 +2138,9 @@ function describe(obj: FabricObject): SelectedInfo {
     symbology: meta?.symbology,
     showText: meta?.showText,
     ecl: meta?.ecl,
+    mark: meta?.mark,
+    boxW: meta?.kind === 'qr' || meta?.kind === 'barcode' ? Math.max(1, Math.round(obj.getScaledWidth())) : undefined,
+    boxH: meta?.kind === 'qr' || meta?.kind === 'barcode' ? Math.max(1, Math.round(obj.getScaledHeight())) : undefined,
     dateFormat: meta?.dateFormat,
     live: meta?.live,
     vertical: meta?.vertical,
