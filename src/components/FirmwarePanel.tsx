@@ -1,14 +1,19 @@
 import { useEffect, useState } from 'react'
 import { useSyncExternalStore } from 'react'
 import {
+  canonicalFirmwareModel,
+  downloadFirmwareOffer,
+  listFirmwareOffers,
+  loadFirmwareManifest,
+  type ListedFirmware,
+  type ManifestResult,
+} from '../lib/firmware-catalog'
+import {
   assessFirmware,
-  downloadFirmwareImage,
   firmwareArchive,
   firmwareSupport,
-  loadFirmwareCatalog,
   versionFromFirmwareImage,
   type FirmwareBlock,
-  type FirmwareImage,
 } from '../lib/firmware'
 import { initialFlash, type FlashCode, type FlashView } from '../lib/firmware-machine'
 import { shownVersion } from '../lib/printer-profile'
@@ -17,12 +22,6 @@ import { printer } from '../printer/controller'
 import type { I18nKey } from '../i18n'
 import { useI18n } from './state'
 import { Button, CheckRow } from './ui'
-
-type CatalogState = {
-  status: 'idle' | 'loading' | 'ready' | 'cors' | 'missing' | 'http' | 'parse'
-  images: FirmwareImage[]
-  pageUrl: string
-}
 
 const LIVE = new Set<FlashView['phase']>(['uploading', 'finishing', 'rebooting', 'reconnecting', 'verifying'])
 
@@ -36,8 +35,9 @@ export function FirmwarePanel() {
   const [confirm, setConfirm] = useState<null | 'downgrade' | 'flash'>(null)
   const [flash, setFlash] = useState<FlashView>(initialFlash)
   const [busy, setBusy] = useState(false)
-  const [downloadFailed, setDownloadFailed] = useState(false)
-  const [fetched, setFetched] = useState<{ model: string; state: CatalogState } | null>(null)
+  const [downloadError, setDownloadError] = useState<'' | 'http' | 'size' | 'sha' | 'model' | 'version'>('')
+  const [picking, setPicking] = useState('')
+  const [manifest, setManifest] = useState<ManifestResult | null>(null)
 
   const connected = link.status === 'connected'
   const model = link.model
@@ -68,27 +68,18 @@ export function FirmwarePanel() {
   const power = assessment.power
 
   useEffect(() => {
-    if (!connected || !support.supported || !archive.hasStableFolder) return
     let cancel = false
-    void loadFirmwareCatalog(model).then((result) => {
-      if (cancel) return
-      const state: CatalogState = result.ok
-        ? { status: 'ready', images: result.images, pageUrl: result.pageUrl }
-        : { status: result.reason, images: [], pageUrl: result.pageUrl }
-      setFetched({ model, state })
+    void loadFirmwareManifest().then((result) => {
+      if (!cancel) setManifest(result)
     })
     return () => {
       cancel = true
     }
-  }, [archive.hasStableFolder, connected, model, support.supported])
+  }, [])
 
-  const catalog: CatalogState = !connected || !support.supported
-      ? { status: 'idle', images: [], pageUrl: archive.stable }
-      : !archive.hasStableFolder
-        ? { status: 'missing', images: [], pageUrl: archive.stable }
-        : fetched?.model === model
-          ? fetched.state
-          : { status: 'loading', images: [], pageUrl: archive.stable }
+  const catalogModel = canonicalFirmwareModel(model)
+  const offers: ListedFirmware[] =
+    connected && catalogModel === 'D11_H' && manifest?.ok ? listFirmwareOffers(manifest.firmwares, { model, hardware: link.hardware, software: link.firmware }) : []
 
   const applyFile = (bytes: Uint8Array, name: string) => {
     const detected = versionFromFirmwareImage(bytes, name)
@@ -98,7 +89,7 @@ export function FirmwarePanel() {
     setAllowDowngrade(false)
     setConfirm(null)
     setFlash(initialFlash())
-    setDownloadFailed(false)
+    setDownloadError('')
   }
 
   const start = () => {
@@ -144,8 +135,66 @@ export function FirmwarePanel() {
       <p className="text-xs leading-5 text-[var(--danger)]">{t('flashStay')}</p>
       {live && !flash.awake && flash.phase !== 'idle' && <p className="text-xs leading-5">{t('flashNoWake')}</p>}
 
-      <div className="flex flex-col gap-1 text-xs leading-5" data-testid="firmware-catalog">
-        <p className="font-bold">{t('flashCatalogTitle')}</p>
+      <div className="flex flex-col gap-2 text-xs leading-5" data-testid="firmware-catalog">
+        <p className="font-bold">{t('flashManifestTitle')}</p>
+        {connected && catalogModel === 'D11_H' && manifest === null && <p>{t('flashManifestLoading')}</p>}
+        {connected && catalogModel === 'D11_H' && manifest && !manifest.ok && manifest.reason === 'parse' && <p>{t('flashManifestParse')}</p>}
+        {connected && catalogModel === 'D11_H' && manifest && !manifest.ok && manifest.reason !== 'parse' && <p>{t('flashManifestHttp')}</p>}
+        {connected && catalogModel !== 'D11_H' && <p>{t('flashManifestNone', { model: label })}</p>}
+        {offers.length > 0 && (
+          <>
+            <p>{t('flashManifestReady')}</p>
+            <ul className="flex flex-col gap-2">
+              {offers.map((offer) => (
+                <li key={offer.url} className={`flex flex-col gap-1 ${offer.recommended ? 'rounded-xl border border-[var(--danger)] p-2' : ''}`} data-testid="firmware-offer">
+                  <span className="truncate font-bold">{offer.name}</span>
+                  <span>
+                    {offer.version}
+                    {' · '}
+                    {offer.kind === 'patched' ? t('flashKindPatched') : offer.kind === 'original' ? t('flashKindOriginal') : t('flashKindStock')}
+                    {offer.stable ? ` · ${t('flashManifestStable')}` : ''}
+                    {' · '}
+                    {offer.relation === 'current'
+                      ? t('flashManifestCurrent')
+                      : offer.relation === 'newer'
+                        ? t('flashManifestNewer')
+                        : offer.relation === 'older'
+                          ? t('flashManifestOlder')
+                          : t('flashManifestUnknown')}
+                    {offer.recommended ? ` · ${t('flashManifestRecommended')}` : ''}
+                    {' · '}
+                    {formatFirmwareSize(offer.size)}
+                  </span>
+                  <span>{offer.notes}</span>
+                  <button
+                    type="button"
+                    className="self-start font-bold text-[var(--accent)] underline disabled:opacity-40"
+                    disabled={live || picking !== ''}
+                    onClick={() => {
+                      setPicking(offer.url)
+                      setDownloadError('')
+                      void downloadFirmwareOffer(offer)
+                        .then((result) => {
+                          if (!result.ok) {
+                            setDownloadError(result.reason === 'version' || result.reason === 'model' ? 'model' : result.reason)
+                            return
+                          }
+                          applyFile(result.bytes, offer.name)
+                        })
+                        .finally(() => setPicking(''))
+                    }}
+                  >
+                    {picking === offer.url ? '…' : t('flashManifestPick')}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        {downloadError === 'sha' && <p className="text-[var(--danger)]">{t('flashManifestSha')}</p>}
+        {downloadError === 'size' && <p className="text-[var(--danger)]">{t('flashManifestSize')}</p>}
+        {(downloadError === 'model' || downloadError === 'version') && <p className="text-[var(--danger)]">{t('flashManifestMismatch')}</p>}
+        {downloadError === 'http' && <p className="text-[var(--danger)]">{t('flashManifestHttp')}</p>}
         <p>
           <a className="font-bold text-[var(--accent)] underline" href={connected && model ? archive.stable : 'https://fw.niim.blue/stable/'} target="_blank" rel="noreferrer">
             {connected && model
@@ -163,36 +212,6 @@ export function FirmwarePanel() {
             </>
           )}
         </p>
-        {connected && catalog.status === 'loading' && <p>{t('flashCatalogLoading')}</p>}
-        {connected && catalog.status === 'cors' && <p>{t('flashCatalogCors')}</p>}
-        {connected && catalog.status === 'missing' && <p>{t('flashCatalogMissing')}</p>}
-        {catalog.status === 'http' && <p>{t('flashCatalogHttp')}</p>}
-        {catalog.status === 'parse' && <p>{t('flashCatalogParse')}</p>}
-        {catalog.status === 'ready' && (
-          <>
-            <p>{t('flashCatalogReady')}</p>
-            <ul className="flex flex-col gap-1">
-              {catalog.images.map((image) => (
-                <li key={image.href} className="flex items-center justify-between gap-2">
-                  <span className="truncate font-bold">{image.name}</span>
-                  <button
-                    type="button"
-                    className="shrink-0 font-bold text-[var(--accent)] underline disabled:opacity-40"
-                    disabled={live}
-                    onClick={() => {
-                      void downloadFirmwareImage(image.href)
-                        .then((bytes) => applyFile(bytes, image.name))
-                        .catch(() => setDownloadFailed(true))
-                    }}
-                  >
-                    {t('flashCatalogPick')}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-        {downloadFailed && <p className="text-[var(--danger)]">{t('flashCatalogHttp')}</p>}
       </div>
 
       <label className="text-xs font-bold text-[var(--muted)]">
@@ -317,6 +336,11 @@ export function FirmwarePanel() {
       </div>
     </div>
   )
+}
+
+function formatFirmwareSize(size: number): string {
+  if (size < 1024) return `${size} B`
+  return `${(size / 1024).toFixed(1)} KiB`
 }
 
 function stageText(flash: FlashView, t: (key: I18nKey, vars?: Record<string, string | number>) => string) {

@@ -133,10 +133,15 @@ export function shownVersion(raw: string): string {
   return raw.match(/\d+\.\d+/)?.[0] ?? raw
 }
 
-/** `B21_Pro_3.13.bin` → `B21_PRO`. A bare `firmware.bin` does not name a model. */
+/**
+ * `B21_Pro_3.13.bin` → `B21_PRO`. A bare `firmware.bin` does not name a model.
+ * A testing prefix `t_` and a suffix after the version (`D11_H_4.28_rfid-bypass.bin`,
+ * `D11_H_4.27_stable.bin`) still name the model. The connected model must still match.
+ */
 export function firmwareFileModel(fileName: string): string | null {
-  const base = fileName.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') ?? ''
-  const match = base.match(/([A-Za-z][A-Za-z0-9]*(?:[\s_-]+[A-Za-z0-9]+)*)[\s_-]+(\d+\.\d+)\s*$/)
+  let base = fileName.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') ?? ''
+  if (/^t[_-]/i.test(base)) base = base.slice(2)
+  const match = base.match(/^([A-Za-z][A-Za-z0-9]*(?:[\s_-]+[A-Za-z0-9]+)*?)[\s_-]+(\d+\.\d+)(?:[\s_-].*)?$/)
   if (!match?.[1]) return null
   return match[1].replace(/[\s-]+/g, '_').replace(/_+/g, '_').toUpperCase()
 }

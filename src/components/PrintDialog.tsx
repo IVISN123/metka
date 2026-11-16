@@ -205,7 +205,13 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
                 {t('disconnect')}
               </Button>
             )}
+            {link.status === 'connected' && (
+              <Button className="!bg-[var(--danger)] !text-white" data-testid="flash-printer" aria-expanded={fwOpen} onClick={() => setFwOpen((open) => !open)}>
+                {t('flashPrinter')}
+              </Button>
+            )}
           </div>
+          {fwOpen && <FirmwarePanel />}
           {!support.bluetooth && <p className="mt-2 text-xs text-[var(--muted)]">{t('bluetoothMissing')}</p>}
           {!support.serial && <p className="mt-1 text-xs text-[var(--muted)]">{t('serialMissing')}</p>}
         </div>
@@ -372,10 +378,9 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
               className="h-40 w-full resize-y rounded-xl border border-[var(--border)] bg-transparent p-2 font-mono text-[11px] leading-4"
               value={link.packetLog || t('noPacketLog')}
             />
-            <button type="button" className="text-left text-sm font-bold text-[var(--danger)]" onClick={() => setFwOpen((open) => !open)}>
+            <button type="button" className="text-left text-sm font-bold text-[var(--danger)]" aria-expanded={fwOpen} onClick={() => setFwOpen((open) => !open)}>
               {t('firmwareFlash')}
             </button>
-            {fwOpen && <FirmwarePanel />}
             <Button
               onClick={() => {
                 const text = [
