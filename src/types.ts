@@ -53,6 +53,7 @@ export type LabelDocument = {
   pageFrom?: number
   pageTo?: number
   preview: PreviewSettings
+  cornerMm?: number
   canvas: Record<string, unknown>
 }
 
@@ -144,6 +145,7 @@ export type EditorState = {
   multi: number
   contentRev: number
   workspace: string
+  cornerMm: number
 }
 
 export type RfidView = {
@@ -222,4 +224,5 @@ export const initialEditorState = (): EditorState => ({
   multi: 0,
   contentRev: 0,
   workspace: '#000000',
+  cornerMm: 1.5,
 })

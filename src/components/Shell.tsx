@@ -29,7 +29,7 @@ import { Inspector, LayerList, ToolPanel } from './Panels'
 import { PrintDialog, type BatchJob } from './PrintDialog'
 import { Stage, useEngine } from './Stage'
 import { useI18n, useTheme } from './state'
-import { Button, IconButton, Modal, TextInput, Toasts } from './ui'
+import { Button, IconButton, Modal, Slider, TextInput, Toasts } from './ui'
 
 export function Shell() {
   const { t, lang, setLang } = useI18n()
@@ -396,6 +396,20 @@ export function Shell() {
             <label className="mt-2 block text-xs text-[var(--muted)]">
               {t('dpi')}
               <TextInput className="mt-1" type="number" value={state.dpi} onChange={(event) => engine.setDpi(Number(event.target.value))} />
+            </label>
+            <label className="mt-3 block text-xs text-[var(--muted)]">
+              {t('corner')}
+              <Slider
+                label={t('corner')}
+                min={0}
+                max={6}
+                step={0.5}
+                value={state.cornerMm}
+                onGestureStart={() => engine.beginGesture()}
+                onGestureEnd={() => engine.endGesture()}
+                onChange={(cornerMm) => engine.setCorner(cornerMm)}
+              />
+              <span className="mt-1 block leading-5">{t('cornerHint')}</span>
             </label>
             <p className="mt-2 text-xs text-[var(--muted)]">{t('resetModel')}</p>
             <p className="text-xs text-[var(--muted)]">{t('pixels', { w: pxW, h: pxH })}</p>

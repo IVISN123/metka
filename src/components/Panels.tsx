@@ -1,12 +1,15 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type ReactNode } from 'react'
 import {
   AlignCenter,
   AlignCenterVertical,
   AlignEndVertical,
+  AlignHorizontalSpaceAround,
   AlignLeft,
   AlignRight,
   AlignStartVertical,
+  AlignVerticalSpaceAround,
   Copy,
+  GripVertical,
   Barcode,
   Bold,
   ChevronDown,
@@ -32,7 +35,8 @@ import {
 } from 'lucide-react'
 import { engine } from '../engine/editor'
 import { describeEncoded } from '../lib/encode'
-import { ICONS } from '../lib/icons'
+import { FontPicker } from './FontPicker'
+import { IconLibrary } from './IconLibrary'
 import { addUserFont, fontChoices, isUploadedFamily, removeUserFont, subscribeFonts } from '../lib/fonts'
 import { BARCODE_FORMATS, DATE_FORMATS, metaFor } from '../lib/presets'
 import { renderDocumentThermal } from '../lib/render'
@@ -66,7 +70,7 @@ export function ToolPanel({ onPicked }: { onPicked?: () => void }) {
     { key: 'text', icon: Type, run: () => { engine.addText(); picked() } },
     { key: 'pageNumber', icon: Hash, run: () => { engine.addNumber(); picked() } },
     { key: 'photo', icon: ImageIcon, run: () => fileRef.current?.click() },
-    { key: 'icons', icon: Sparkles, run: () => setIconsOpen((open) => !open) },
+    { key: 'icons', icon: Sparkles, run: () => setIconsOpen(true) },
     { key: 'shapes', icon: Square, run: () => setShapesOpen((open) => !open) },
     { key: 'line', icon: Minus, run: () => { engine.addLine(); picked() } },
     { key: 'barcode', icon: Barcode, run: () => void engine.addBarcode().then(picked).catch((error: unknown) => toast(String(error))) },
@@ -101,19 +105,12 @@ export function ToolPanel({ onPicked }: { onPicked?: () => void }) {
         }}
       />
       {iconsOpen && (
-        <div className="mt-2 grid grid-cols-6 gap-1 rounded-2xl border border-[var(--border)] p-2">
-          {ICONS.map((icon) => (
-            <button
-              key={icon.id}
-              type="button"
-              title={icon.id}
-              aria-label={icon.id}
-              className="grid h-11 place-items-center rounded-xl hover:bg-[var(--hover)]"
-              onClick={() => void engine.addIcon(icon.id).then(() => onPicked?.())}
-              dangerouslySetInnerHTML={{ __html: icon.svg.replace('viewBox', 'width="22" height="22" viewBox') }}
-            />
-          ))}
-        </div>
+        <IconLibrary
+          onClose={() => setIconsOpen(false)}
+          onPick={(id) => {
+            void engine.addIcon(id).then(() => onPicked?.())
+          }}
+        />
       )}
       {shapesOpen && (
         <div className="mt-2 grid grid-cols-2 gap-1">
@@ -156,9 +153,30 @@ function LayerRow({ layer, active }: { layer: LayerInfo; active: boolean }) {
   const { t } = useI18n()
   const Icon = KIND_ICON[layer.kind]
   return (
-    <li className={`flex items-center gap-1 rounded-2xl pr-1 ${active ? 'bg-[var(--hover)]' : 'hover:bg-[var(--hover)]'}`}>
-      <button type="button" onClick={() => engine.select(layer.id)} className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left text-sm">
-        <Icon size={15} className="shrink-0 text-[var(--muted)]" />
+    <li
+      className={`flex items-center gap-1 rounded-2xl pr-1 ${active ? 'bg-[var(--hover)]' : 'hover:bg-[var(--hover)]'}`}
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={(event) => {
+        event.preventDefault()
+        const id = event.dataTransfer.getData('text/plain')
+        if (id) engine.moveLayer(id, layer.id)
+      }}
+    >
+      <button
+        type="button"
+        draggable
+        aria-label={t('reorder')}
+        title={t('reorder')}
+        className="grid h-11 w-8 shrink-0 cursor-grab place-items-center text-[var(--icon)]"
+        onDragStart={(event) => {
+          event.dataTransfer.setData('text/plain', layer.id)
+          event.dataTransfer.effectAllowed = 'move'
+        }}
+      >
+        <GripVertical size={16} />
+      </button>
+      <button type="button" onClick={() => engine.select(layer.id)} className="flex min-w-0 flex-1 items-center gap-2 px-1 py-2 text-left text-sm text-[var(--text)]">
+        <Icon size={16} className="shrink-0 text-[var(--icon)]" />
         <span className="truncate">{layer.name}</span>
       </button>
       <IconButton label={layer.visible ? t('hide') : t('show')} onClick={() => engine.toggleVisible(layer.id)}>
@@ -190,6 +208,8 @@ export function Inspector() {
             <IconButton label={t('alignMiddle')} onClick={() => engine.align('middle')}><AlignCenterVertical size={18} /></IconButton>
             <IconButton label={t('alignBottom')} onClick={() => engine.align('bottom')}><AlignEndVertical size={18} /></IconButton>
             <IconButton label={t('duplicate')} onClick={() => void engine.duplicate()}><Copy size={18} /></IconButton>
+            <IconButton label={t('distributeH')} disabled={state.multi < 3} onClick={() => engine.distribute('x')}><AlignHorizontalSpaceAround size={18} /></IconButton>
+            <IconButton label={t('distributeV')} disabled={state.multi < 3} onClick={() => engine.distribute('y')}><AlignVerticalSpaceAround size={18} /></IconButton>
             <IconButton label={t('deleteObj')} onClick={() => engine.deleteSelected()}><Trash2 size={16} /></IconButton>
           </div>
         )}
@@ -217,16 +237,7 @@ export function Inspector() {
             {(selected.kind === 'text' || selected.kind === 'datetime' || selected.kind === 'number') && (
               <>
                 <Field label={t('font')}>
-                  <SelectInput value={selected.fontFamily ?? ''} onChange={(event) => void engine.updateSelected({ fontFamily: event.target.value })}>
-                    {fonts.map((font) => (
-                      <option key={font.id} value={font.family} style={{ fontFamily: font.family }}>
-                        {font.label}
-                      </option>
-                    ))}
-                    {selected.fontFamily && !fonts.some((font) => font.family === selected.fontFamily) && (
-                      <option value={selected.fontFamily}>{selected.fontFamily}</option>
-                    )}
-                  </SelectInput>
+                  <FontPicker value={selected.fontFamily ?? ''} onChange={(fontFamily) => void engine.updateSelected({ fontFamily })} />
                   <div className="mt-2 flex flex-wrap gap-2">
                     <label className="inline-flex h-9 cursor-pointer items-center rounded-full border border-[var(--border)] px-3 text-sm font-bold hover:bg-[var(--hover)]">
                       {t('uploadFont')}
@@ -281,7 +292,7 @@ export function Inspector() {
                   </Field>
                 )}
                 <Field label={t('fontSize')}>
-                  <Slider label={t('fontSize')} min={8} max={160} value={selected.fontSize ?? 16} onChange={(value) => void engine.updateSelected({ fontSize: value })} />
+                  <HistorySlider label={t('fontSize')} min={8} max={160} value={selected.fontSize ?? 16} onChange={(value) => void engine.updateSelected({ fontSize: value })} />
                 </Field>
                 <div className="flex gap-1">
                   <Toggle on={String(selected.fontWeight) === '700' || selected.fontWeight === 'bold'} label={t('bold')} onClick={() => void engine.updateSelected({ fontWeight: String(selected.fontWeight) === '700' ? '400' : '700' })}>
@@ -330,10 +341,10 @@ export function Inspector() {
             {selected.kind === 'image' && (
               <>
                 <Field label={t('brightness')}>
-                  <Slider label={t('brightness')} min={-100} max={100} value={Math.round((selected.brightness ?? 0) * 100)} onChange={(value) => void engine.updateSelected({ brightness: value / 100 })} />
+                  <HistorySlider label={t('brightness')} min={-100} max={100} value={Math.round((selected.brightness ?? 0) * 100)} onChange={(value) => void engine.updateSelected({ brightness: value / 100 })} />
                 </Field>
                 <Field label={t('contrast')}>
-                  <Slider label={t('contrast')} min={-100} max={100} value={Math.round((selected.contrast ?? 0) * 100)} onChange={(value) => void engine.updateSelected({ contrast: value / 100 })} />
+                  <HistorySlider label={t('contrast')} min={-100} max={100} value={Math.round((selected.contrast ?? 0) * 100)} onChange={(value) => void engine.updateSelected({ contrast: value / 100 })} />
                 </Field>
                 <CheckRow checked={!!selected.invert} onChange={(invert) => void engine.updateSelected({ invert })}>
                   {t('invert')}
@@ -389,17 +400,27 @@ export function Inspector() {
                 <Swatches label={t('fill')} value={selected.fill} onChange={(fill) => void engine.updateSelected({ fill })} />
                 <Swatches label={t('stroke')} value={selected.stroke} onChange={(stroke) => void engine.updateSelected({ stroke })} />
                 <Field label={t('strokeWidth')}>
-                  <Slider label={t('strokeWidth')} min={0} max={12} value={selected.strokeWidth} onChange={(strokeWidth) => void engine.updateSelected({ strokeWidth })} />
+                  <HistorySlider label={t('strokeWidth')} min={0} max={12} value={selected.strokeWidth} onChange={(strokeWidth) => void engine.updateSelected({ strokeWidth })} />
                 </Field>
               </>
             )}
             {selected.rx !== undefined && (
               <Field label={t('radius')}>
-                <Slider label={t('radius')} min={0} max={40} value={selected.rx} onChange={(rx) => void engine.updateSelected({ rx })} />
+                <HistorySlider label={t('radius')} min={0} max={40} value={selected.rx} onChange={(rx) => void engine.updateSelected({ rx })} />
               </Field>
             )}
             <Field label={t('angle')}>
-              <Slider label={t('angle')} min={-180} max={180} value={selected.angle} onChange={(angle) => void engine.updateSelected({ angle })} />
+              <HistorySlider label={t('angle')} min={-180} max={180} value={selected.angle} onChange={(angle) => void engine.updateSelected({ angle })} />
+            </Field>
+            <Field label={t('opacity')}>
+              <HistorySlider
+                label={t('opacity')}
+                min={0}
+                max={100}
+                value={Math.round((selected.opacity ?? 1) * 100)}
+                onChange={(value) => void engine.updateSelected({ opacity: value / 100 })}
+              />
+              <span className="mt-1 block text-xs text-[var(--muted)]">{t('opacityHint')}</span>
             </Field>
             <div>
               <div className="mb-1 text-xs text-[var(--muted)]">{t('order')}</div>
@@ -416,6 +437,10 @@ export function Inspector() {
       </div>
     </div>
   )
+}
+
+function HistorySlider(props: ComponentProps<typeof Slider>) {
+  return <Slider {...props} onGestureStart={() => engine.beginGesture()} onGestureEnd={() => engine.endGesture()} />
 }
 
 function Toggle({ on, label, onClick, children }: { on: boolean; label: string; onClick: () => void; children: ReactNode }) {

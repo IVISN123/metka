@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest'
+import { iconById, searchSymbols, symbolSvg } from './icons'
 import {
+  alignDelta,
   boxToMm,
   canBindSeries,
   classSetsDisplay,
+  defaultCornerMm,
+  distributeDelta,
   labelWord,
   matchEditorShortcut,
   originPoint,
   pinchZoom,
+  rulerMarks,
   topLeftBox,
   type ShortcutInput,
 } from './editor-ui'
@@ -67,6 +72,40 @@ describe('pinch and geometry', () => {
     expect(canBindSeries('qr')).toBe(true)
     expect(canBindSeries('image')).toBe(false)
     expect(canBindSeries(undefined)).toBe(false)
+  })
+
+  it('aligns and distributes boxes without touching the print path', () => {
+    expect(alignDelta({ left: 10, top: 4, width: 20, height: 8 }, { left: 0, top: 0, width: 100, height: 40 }, 'left')).toEqual({ dx: -10, dy: 0 })
+    expect(alignDelta({ left: 10, top: 4, width: 20, height: 10 }, { left: 0, top: 0, width: 80, height: 30 }, 'center')).toEqual({ dx: 20, dy: 0 })
+    const deltas = distributeDelta(
+      [
+        { left: 0, top: 0, width: 10, height: 10 },
+        { left: 40, top: 0, width: 10, height: 10 },
+        { left: 100, top: 0, width: 10, height: 10 },
+      ],
+      'x',
+    )
+    expect(deltas[0]).toBe(0)
+    expect(deltas[2]).toBe(0)
+    expect(deltas[1]).toBeCloseTo(10)
+  })
+
+  it('picks a corner radius from the label size and ruler ticks from zoom', () => {
+    expect(defaultCornerMm(40, 12)).toBe(1.5)
+    expect(defaultCornerMm(50, 30)).toBe(2)
+    expect(defaultCornerMm(80, 50)).toBe(3)
+    expect(rulerMarks(0, 12, 8).filter((mark) => mark.level === 10).map((mark) => mark.mm)).toEqual([0, 10])
+    expect(rulerMarks(0, 6, 2).some((mark) => mark.level === 1)).toBe(false)
+  })
+
+  it('paints label symbols black for thermal output and finds them in Russian', () => {
+    const fragile = iconById('fragile')
+    expect(fragile).toBeTruthy()
+    expect(symbolSvg(fragile!, '#000000')).toContain('stroke="#000000"')
+    expect(symbolSvg(iconById('laurel')!, 'currentColor')).toContain('currentColor')
+    expect(symbolSvg(iconById('laurel')!, 'currentColor')).not.toContain('#111')
+    expect(searchSymbols('хруп', 'pack').some((icon) => icon.id === 'fragile')).toBe(true)
+    expect(searchSymbols('wifi', 'all').some((icon) => icon.id === 'wifi')).toBe(true)
   })
 
   it('detects a display utility even with a breakpoint prefix', () => {

@@ -84,6 +84,8 @@ export function Slider({
   step,
   onChange,
   label,
+  onGestureStart,
+  onGestureEnd,
 }: {
   value: number
   min: number
@@ -91,6 +93,8 @@ export function Slider({
   step?: number
   onChange: (value: number) => void
   label?: string
+  onGestureStart?: () => void
+  onGestureEnd?: () => void
 }) {
   const [draft, setDraft] = useState(String(value))
   const [seen, setSeen] = useState(value)
@@ -115,6 +119,9 @@ export function Slider({
         max={max}
         step={step ?? 1}
         value={value}
+        onPointerDown={() => onGestureStart?.()}
+        onPointerUp={() => onGestureEnd?.()}
+        onPointerCancel={() => onGestureEnd?.()}
         onChange={(event) => onChange(Number(event.target.value))}
         className="h-11 min-w-0 flex-1 accent-[var(--accent)]"
       />

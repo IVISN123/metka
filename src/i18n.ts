@@ -314,6 +314,19 @@ const ru = {
   batchTarget: 'Серия пойдёт в «{name}»',
   dismiss: 'Скрыть',
   sheetDone: 'Готово',
+  corner: 'Скругление углов, мм',
+  cornerHint: 'Только картинка на экране. На принтер уходит прямой прямоугольник.',
+  opacityHint: 'На термопечати серый становится точками растра.',
+  distributeH: 'Распределить по ширине',
+  distributeV: 'Распределить по высоте',
+  reorder: 'Перетащить слой',
+  iconSearch: 'Найти знак',
+  iconLibrary: 'Знаки',
+  allSymbols: 'Все',
+  fontSearch: 'Найти шрифт',
+  systemFonts: 'Системные',
+  bundledFonts: 'В комплекте',
+  noFont: 'Ничего не нашлось',
 } as const
 
 const en: { [K in keyof typeof ru]: string } = {
@@ -630,6 +643,19 @@ const en: { [K in keyof typeof ru]: string } = {
   batchTarget: 'The series goes into “{name}”',
   dismiss: 'Hide',
   sheetDone: 'Done',
+  corner: 'Corner radius, mm',
+  cornerHint: 'On screen only. The printer still receives a square corner.',
+  opacityHint: 'Thermal output turns gray into a dot pattern.',
+  distributeH: 'Distribute horizontally',
+  distributeV: 'Distribute vertically',
+  reorder: 'Drag layer',
+  iconSearch: 'Find a symbol',
+  iconLibrary: 'Symbols',
+  allSymbols: 'All',
+  fontSearch: 'Find a font',
+  systemFonts: 'On this device',
+  bundledFonts: 'Included',
+  noFont: 'Nothing matches',
 }
 
 export type I18nKey = keyof typeof ru

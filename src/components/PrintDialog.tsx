@@ -205,6 +205,8 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
             min={meta?.densityMin ?? 1}
             max={meta?.densityMax ?? 5}
             value={state.density}
+            onGestureStart={() => engine.beginGesture()}
+            onGestureEnd={() => engine.endGesture()}
             onChange={(density) => engine.setDensity(density)}
           />
         </Field>

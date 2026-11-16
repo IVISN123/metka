@@ -20,12 +20,26 @@ import { initialEditorState } from '../types'
 import { buildBuiltin } from './builtins'
 import { readMeta, writeMeta } from './meta'
 import { barcodeDataUrl, qrDataUrl } from '../lib/codes'
-import { iconById } from '../lib/icons'
+import { iconById, symbolSvg } from '../lib/icons'
 import { formatPageLabel, parsePageRange } from '../lib/pages'
 import { metaFor, suggestedTask } from '../lib/presets'
 import { ensureFontsReady } from '../lib/fonts'
 import { readAutosave } from '../lib/storage'
-import { boxToMm, matchEditorShortcut, originPoint, pinchZoom, topLeftBox, touchDistance } from '../lib/editor-ui'
+import {
+  alignDelta,
+  boxToMm,
+  defaultCornerMm,
+  distributeDelta,
+  matchEditorShortcut,
+  originPoint,
+  pinchZoom,
+  rulerMarks,
+  topLeftBox,
+  touchDistance,
+  unionBox,
+  type AlignEdge,
+  type AxisBox,
+} from '../lib/editor-ui'
 import { clamp, formatDate, mmToPx, uid, verticalize } from '../lib/units'
 
 type GuideSet = { vertical: number[]; horizontal: number[] }
@@ -73,6 +87,8 @@ export class EditorEngine {
   private panning = false
   private lastPan = { x: 0, y: 0 }
   private pinch: { dist: number; zoom: number } | null = null
+  private gesture = false
+  private gestureWrote = false
   private observer: ResizeObserver | null = null
   private onKeyDown = (event: KeyboardEvent) => this.keyDown(event)
   private onKeyUp = (event: KeyboardEvent) => {
@@ -307,6 +323,7 @@ export class EditorEngine {
       pageFrom: state.pageFrom,
       pageTo: state.pageTo,
       preview: state.preview,
+      cornerMm: state.cornerMm,
       canvas: this.canvas.toObject(['data']) as Record<string, unknown>,
     }
   }
@@ -316,6 +333,12 @@ export class EditorEngine {
     this.suspend += 1
     this.pxW = mmToPx(doc.widthMm, doc.dpi)
     this.pxH = mmToPx(doc.heightMm, doc.dpi)
+    this.commit({
+      dpi: doc.dpi,
+      widthMm: doc.widthMm,
+      heightMm: doc.heightMm,
+      cornerMm: doc.cornerMm ?? defaultCornerMm(doc.widthMm, doc.heightMm),
+    })
     await this.canvas.loadFromJSON(doc.canvas)
     this.ensurePaper()
     this.canvas.backgroundColor = this.snapshot.workspace
@@ -341,6 +364,7 @@ export class EditorEngine {
       pageFrom: doc.pageFrom ?? 1,
       pageTo: doc.pageTo ?? 1,
       preview: doc.preview,
+      cornerMm: doc.cornerMm ?? defaultCornerMm(doc.widthMm, doc.heightMm),
       dirty,
     })
     this.pushHistory(false)
@@ -377,6 +401,8 @@ export class EditorEngine {
         height,
         originX: 'center',
         originY: 'center',
+        rx: this.cornerPx(),
+        ry: this.cornerPx(),
         fill: '#ffffff',
         selectable: false,
         evented: false,
@@ -387,7 +413,7 @@ export class EditorEngine {
       })
       this.canvas.add(this.paper)
     } else {
-      this.paper.set({ left: width / 2, top: height / 2, width, height, scaleX: 1, scaleY: 1 })
+      this.paper.set({ left: width / 2, top: height / 2, width, height, scaleX: 1, scaleY: 1, rx: this.cornerPx(), ry: this.cornerPx() })
       this.paper.setCoords()
     }
     this.canvas.sendObjectToBack(this.paper)
@@ -485,8 +511,9 @@ export class EditorEngine {
   }
 
   async addIcon(id: string) {
-    const svg = iconById(id)?.svg
-    if (!svg || !this.canvas) return
+    const icon = iconById(id)
+    if (!icon || !this.canvas) return
+    const svg = symbolSvg(icon, '#000000')
     const parsed = await loadSVGFromString(svg)
     const objects = parsed.objects.filter((object): object is FabricObject => object !== null)
     if (objects.length === 0) return
@@ -501,7 +528,7 @@ export class EditorEngine {
       top: center.y,
       scaleX: scale,
       scaleY: scale,
-      data: { id: uid(), kind: 'icon', name: this.named('icon'), iconId: id },
+      data: { id: uid(), kind: 'icon', name: this.lang === 'en' ? icon.en : icon.ru, iconId: id },
     })
     this.place(group)
   }
@@ -728,24 +755,78 @@ export class EditorEngine {
     await this.spawn(this.clip.map((item) => structuredClone(item)), 12)
   }
 
-  align(mode: 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom') {
+  align(mode: AlignEdge) {
     if (!this.canvas) return
-    for (const obj of this.canvas.getActiveObjects()) {
-      if (readMeta(obj)?.kind === 'paper') continue
-      const bounds = obj.getBoundingRect()
-      let dx = 0
-      let dy = 0
-      if (mode === 'left') dx = -bounds.left
-      if (mode === 'center') dx = this.pxW / 2 - (bounds.left + bounds.width / 2)
-      if (mode === 'right') dx = this.pxW - (bounds.left + bounds.width)
-      if (mode === 'top') dy = -bounds.top
-      if (mode === 'middle') dy = this.pxH / 2 - (bounds.top + bounds.height / 2)
-      if (mode === 'bottom') dy = this.pxH - (bounds.top + bounds.height)
-      obj.set({ left: (obj.left ?? 0) + dx, top: (obj.top ?? 0) + dy })
-      obj.setCoords()
+    const objects = this.canvas.getActiveObjects().filter((obj) => readMeta(obj)?.kind !== 'paper')
+    if (objects.length === 0) return
+    const boxes = objects.map((obj) => ({ obj, box: obj.getBoundingRect() }))
+    const bounds: AxisBox =
+      boxes.length === 1
+        ? { left: 0, top: 0, width: this.pxW, height: this.pxH }
+        : unionBox(boxes.map((item) => item.box))
+    for (const item of boxes) {
+      const { dx, dy } = alignDelta(item.box, bounds, mode)
+      item.obj.set({ left: (item.obj.left ?? 0) + dx, top: (item.obj.top ?? 0) + dy })
+      item.obj.setCoords()
     }
     this.canvas.requestRenderAll()
     this.pushHistory()
+  }
+
+  distribute(axis: 'x' | 'y') {
+    if (!this.canvas) return
+    const objects = this.canvas.getActiveObjects().filter((obj) => readMeta(obj)?.kind !== 'paper')
+    if (objects.length < 3) return
+    const boxes = objects.map((obj) => obj.getBoundingRect())
+    const deltas = distributeDelta(boxes, axis)
+    objects.forEach((obj, index) => {
+      const delta = deltas[index] ?? 0
+      obj.set({
+        left: (obj.left ?? 0) + (axis === 'x' ? delta : 0),
+        top: (obj.top ?? 0) + (axis === 'y' ? delta : 0),
+      })
+      obj.setCoords()
+    })
+    this.canvas.requestRenderAll()
+    this.pushHistory()
+  }
+
+  moveLayer(id: string, targetId: string) {
+    if (!this.canvas || !this.paper || id === targetId) return
+    const objects = this.userObjects()
+    const moving = objects.find((obj) => readMeta(obj)?.id === id)
+    const target = objects.find((obj) => readMeta(obj)?.id === targetId)
+    if (!moving || !target) return
+    const next = objects.filter((obj) => obj !== moving)
+    const at = next.indexOf(target)
+    if (at < 0) return
+    next.splice(at, 0, moving)
+    next.forEach((obj, index) => this.canvas?.moveObjectTo(obj, index + 1))
+    if (this.canvas.getObjects().indexOf(this.paper) !== 0) this.canvas.sendObjectToBack(this.paper)
+    this.canvas.requestRenderAll()
+    this.pushHistory()
+  }
+
+  beginGesture() {
+    this.gesture = true
+    this.gestureWrote = false
+  }
+
+  endGesture() {
+    this.gesture = false
+    this.gestureWrote = false
+  }
+
+  setCorner(cornerMm: number) {
+    const next = clamp(cornerMm, 0, 8)
+    this.commit({ cornerMm: Math.round(next * 10) / 10 })
+    this.ensurePaper()
+    this.canvas?.requestRenderAll()
+    this.pushHistory()
+  }
+
+  private cornerPx() {
+    return mmToPx(this.snapshot.cornerMm || 0, this.snapshot.dpi || 203)
   }
 
   order(action: 'forward' | 'backward' | 'front' | 'back') {
@@ -849,8 +930,8 @@ export class EditorEngine {
     if (nextDpi !== this.snapshot.dpi) this.applyDpi(nextDpi)
     this.pxW = mmToPx(width, nextDpi)
     this.pxH = mmToPx(height, nextDpi)
+    this.commit({ widthMm: width, heightMm: height, dpi: nextDpi, cornerMm: defaultCornerMm(width, height) })
     this.ensurePaper()
-    this.commit({ widthMm: width, heightMm: height, dpi: nextDpi })
     this.pushHistory()
     this.fit()
   }
@@ -1022,10 +1103,20 @@ export class EditorEngine {
       this.syncSelection()
       return
     }
+    if (this.gesture && this.gestureWrote && this.histIndex >= 0) {
+      this.history[this.histIndex] = json
+      this.commit({
+        dirty: markDirty ? true : this.snapshot.dirty,
+        contentRev: this.snapshot.contentRev + 1,
+      })
+      this.syncSelection()
+      return
+    }
     this.history = this.history.slice(0, this.histIndex + 1)
     this.history.push(json)
     if (this.history.length > 40) this.history.shift()
     this.histIndex = this.history.length - 1
+    if (this.gesture) this.gestureWrote = true
     this.commit({
       canUndo: this.histIndex > 0,
       canRedo: false,
@@ -1041,6 +1132,12 @@ export class EditorEngine {
     this.suspend += 1
     this.pxW = mmToPx(doc.widthMm, doc.dpi)
     this.pxH = mmToPx(doc.heightMm, doc.dpi)
+    this.commit({
+      dpi: doc.dpi,
+      widthMm: doc.widthMm,
+      heightMm: doc.heightMm,
+      cornerMm: doc.cornerMm ?? defaultCornerMm(doc.widthMm, doc.heightMm),
+    })
     await this.canvas.loadFromJSON(doc.canvas)
     this.ensurePaper()
     this.suspend -= 1
@@ -1060,6 +1157,7 @@ export class EditorEngine {
       pageFrom: doc.pageFrom ?? 1,
       pageTo: doc.pageTo ?? 1,
       preview: doc.preview,
+      cornerMm: doc.cornerMm ?? defaultCornerMm(doc.widthMm, doc.heightMm),
       canUndo: this.histIndex > 0,
       canRedo: this.histIndex < this.history.length - 1,
       dirty: true,
@@ -1215,7 +1313,74 @@ export class EditorEngine {
       ctx.lineTo(width, sy + 0.5)
       ctx.stroke()
     }
+    this.drawLabelChrome(ctx, vpt, width, height)
     ctx.restore()
+  }
+
+  private drawLabelChrome(ctx: CanvasRenderingContext2D, vpt: number[], width: number, height: number) {
+    const zoom = vpt[0] || 1
+    const dpi = this.snapshot.dpi || 203
+    const pxPerMm = (dpi / 25.4) * zoom
+    const originX = vpt[4] ?? 0
+    const originY = vpt[5] ?? 0
+    const labelW = this.pxW * zoom
+    const labelH = this.pxH * zoom
+    const radius = this.cornerPx() * zoom
+    if (radius > 0.5 && labelW > 2 && labelH > 2) {
+      const corner = Math.min(radius, labelW / 2, labelH / 2)
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(originX, originY, labelW, labelH)
+      ctx.roundRect(originX, originY, labelW, labelH, corner)
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.45)'
+      ctx.fill('evenodd')
+      ctx.restore()
+    }
+    const styles = getComputedStyle(document.documentElement)
+    const bar = styles.getPropertyValue('--elev').trim() || '#16181c'
+    const ink = styles.getPropertyValue('--text').trim() || '#f7f9f9'
+    const muted = styles.getPropertyValue('--muted').trim() || '#b8c1c8'
+    const ruler = 26
+    ctx.fillStyle = bar
+    ctx.fillRect(0, 0, width, ruler)
+    ctx.fillRect(0, 0, ruler, height)
+    ctx.strokeStyle = muted
+    ctx.fillStyle = ink
+    ctx.lineWidth = 1
+    ctx.font = '10px ui-sans-serif, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'top'
+    const xMarks = rulerMarks((ruler - originX) / pxPerMm, (width - originX) / pxPerMm, pxPerMm)
+    for (const mark of xMarks) {
+      const sx = originX + mark.mm * pxPerMm
+      if (sx < ruler) continue
+      const tick = mark.level === 10 ? 12 : mark.level === 5 ? 8 : 4
+      ctx.beginPath()
+      ctx.moveTo(sx + 0.5, ruler)
+      ctx.lineTo(sx + 0.5, ruler - tick)
+      ctx.stroke()
+      if (mark.level === 10) ctx.fillText(String(mark.mm), sx, 2)
+    }
+    ctx.textAlign = 'right'
+    ctx.textBaseline = 'middle'
+    const yMarks = rulerMarks((ruler - originY) / pxPerMm, (height - originY) / pxPerMm, pxPerMm)
+    for (const mark of yMarks) {
+      const sy = originY + mark.mm * pxPerMm
+      if (sy < ruler) continue
+      const tick = mark.level === 10 ? 12 : mark.level === 5 ? 8 : 4
+      ctx.beginPath()
+      ctx.moveTo(ruler, sy + 0.5)
+      ctx.lineTo(ruler - tick, sy + 0.5)
+      ctx.stroke()
+      if (mark.level === 10) ctx.fillText(String(mark.mm), ruler - 2, sy)
+    }
+    ctx.fillStyle = bar
+    ctx.fillRect(0, 0, ruler, ruler)
+    ctx.fillStyle = muted
+    ctx.font = '9px ui-sans-serif, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('мм', ruler / 2, ruler / 2)
   }
 
   private keyDown(event: KeyboardEvent) {
