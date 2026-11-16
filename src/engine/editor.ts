@@ -36,10 +36,12 @@ import {
   matchEditorShortcut,
   originPoint,
   pinchZoom,
-  rulerMarks,
   topLeftBox,
   touchDistance,
   unionBox,
+  gridStops,
+  normalizeGridStep,
+  rulerLayout,
   type AlignEdge,
   type AxisBox,
 } from '../lib/editor-ui'
@@ -76,7 +78,7 @@ export class EditorEngine {
   private paper: Rect | null = null
   private pxW = 320
   private pxH = 96
-  private snapshot: EditorState = initialEditorState()
+  private snapshot: EditorState = { ...initialEditorState(), ...readGridPrefs() }
   private listeners = new Set<() => void>()
   private history: string[] = []
   private histIndex = -1
@@ -855,6 +857,52 @@ export class EditorEngine {
     this.pushHistory()
   }
 
+  setGrid(patch: { gridOn?: boolean; gridStep?: number; snapGrid?: boolean }) {
+    const next = {
+      gridOn: patch.gridOn ?? this.snapshot.gridOn,
+      gridStep: patch.gridStep === undefined ? this.snapshot.gridStep : normalizeGridStep(patch.gridStep),
+      snapGrid: patch.snapGrid ?? this.snapshot.snapGrid,
+    }
+    this.commit(next)
+    try {
+      localStorage.setItem('metka.grid', JSON.stringify(next))
+    } catch {
+      /* private mode */
+    }
+    this.drawGuides()
+  }
+
+  async newBlank(input: { name: string; widthMm: number; heightMm: number; cornerMm: number }) {
+    if (!Number.isFinite(input.widthMm) || !Number.isFinite(input.heightMm)) return false
+    const blank = await buildBuiltin('blank')
+    const bounded = clampSize(input.widthMm, input.heightMm, this.snapshot.dpi)
+    const corner = Math.round(clamp(input.cornerMm, 0, 8) * 10) / 10
+    const state = this.snapshot
+    await this.loadDocument(
+      {
+        ...blank,
+        name: input.name.trim() || blank.name,
+        widthMm: bounded.widthMm,
+        heightMm: bounded.heightMm,
+        dpi: state.dpi,
+        model: state.model,
+        direction: state.direction,
+        labelType: state.labelType,
+        density: state.density,
+        quantity: 1,
+        align: state.align,
+        task: state.task,
+        taskAuto: state.taskAuto,
+        preview: state.preview,
+        cornerMm: corner,
+        canvas: { objects: [] },
+      },
+      null,
+      true,
+    )
+    return true
+  }
+
   private cornerPx() {
     return mmToPx(this.snapshot.cornerMm || 0, this.snapshot.dpi || 203)
   }
@@ -1336,6 +1384,10 @@ export class EditorEngine {
     const bounds = target.getBoundingRect()
     const xs = [0, this.pxW / 2, this.pxW]
     const ys = [0, this.pxH / 2, this.pxH]
+    if (this.snapshot.snapGrid) {
+      xs.push(...gridStops(this.pxW, this.snapshot.widthMm, this.snapshot.gridStep))
+      ys.push(...gridStops(this.pxH, this.snapshot.heightMm, this.snapshot.gridStep))
+    }
     for (const obj of this.canvas.getObjects()) {
       if (obj === target || obj === this.paper || obj.group === target) continue
       const box = obj.getBoundingRect()
@@ -1421,8 +1473,6 @@ export class EditorEngine {
 
   private drawLabelChrome(ctx: CanvasRenderingContext2D, vpt: number[], width: number, height: number) {
     const zoom = vpt[0] || 1
-    const dpi = this.snapshot.dpi || 203
-    const pxPerMm = (dpi / 25.4) * zoom
     const originX = vpt[4] ?? 0
     const originY = vpt[5] ?? 0
     const labelW = this.pxW * zoom
@@ -1438,51 +1488,148 @@ export class EditorEngine {
       ctx.fill('evenodd')
       ctx.restore()
     }
+    if (this.snapshot.gridOn && labelW > 2 && labelH > 2) {
+      const stopsX = gridStops(labelW, this.snapshot.widthMm, this.snapshot.gridStep)
+      const stopsY = gridStops(labelH, this.snapshot.heightMm, this.snapshot.gridStep)
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(originX, originY, labelW, labelH)
+      ctx.clip()
+      ctx.strokeStyle = 'rgba(29, 155, 240, 0.45)'
+      ctx.lineWidth = 1
+      for (const stop of stopsX) {
+        const sx = originX + stop
+        ctx.beginPath()
+        ctx.moveTo(sx + 0.5, originY)
+        ctx.lineTo(sx + 0.5, originY + labelH)
+        ctx.stroke()
+      }
+      for (const stop of stopsY) {
+        const sy = originY + stop
+        ctx.beginPath()
+        ctx.moveTo(originX, sy + 0.5)
+        ctx.lineTo(originX + labelW, sy + 0.5)
+        ctx.stroke()
+      }
+      ctx.restore()
+    }
     const styles = getComputedStyle(document.documentElement)
-    const bar = styles.getPropertyValue('--elev').trim() || '#16181c'
+    const bar = styles.getPropertyValue('--card').trim() || '#000000'
     const ink = styles.getPropertyValue('--text').trim() || '#f7f9f9'
     const muted = styles.getPropertyValue('--muted').trim() || '#b8c1c8'
-    const ruler = 26
+    const accent = styles.getPropertyValue('--accent').trim() || '#1d9bf0'
+    const ruler = 34
+    const pxPerMmX = this.snapshot.widthMm > 0 ? labelW / this.snapshot.widthMm : zoom
+    const pxPerMmY = this.snapshot.heightMm > 0 ? labelH / this.snapshot.heightMm : zoom
     ctx.fillStyle = bar
     ctx.fillRect(0, 0, width, ruler)
     ctx.fillRect(0, 0, ruler, height)
     ctx.strokeStyle = muted
-    ctx.fillStyle = ink
     ctx.lineWidth = 1
-    ctx.font = '10px ui-sans-serif, sans-serif'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'top'
-    const xMarks = rulerMarks((ruler - originX) / pxPerMm, (width - originX) / pxPerMm, pxPerMm)
-    for (const mark of xMarks) {
-      const sx = originX + mark.mm * pxPerMm
-      if (sx < ruler) continue
-      const tick = mark.level === 10 ? 12 : mark.level === 5 ? 8 : 4
-      ctx.beginPath()
-      ctx.moveTo(sx + 0.5, ruler)
-      ctx.lineTo(sx + 0.5, ruler - tick)
-      ctx.stroke()
-      if (mark.level === 10) ctx.fillText(String(mark.mm), sx, 2)
-    }
-    ctx.textAlign = 'right'
-    ctx.textBaseline = 'middle'
-    const yMarks = rulerMarks((ruler - originY) / pxPerMm, (height - originY) / pxPerMm, pxPerMm)
-    for (const mark of yMarks) {
-      const sy = originY + mark.mm * pxPerMm
-      if (sy < ruler) continue
-      const tick = mark.level === 10 ? 12 : mark.level === 5 ? 8 : 4
-      ctx.beginPath()
-      ctx.moveTo(ruler, sy + 0.5)
-      ctx.lineTo(ruler - tick, sy + 0.5)
-      ctx.stroke()
-      if (mark.level === 10) ctx.fillText(String(mark.mm), ruler - 2, sy)
-    }
+    ctx.font = '11px ui-sans-serif, sans-serif'
+    ctx.beginPath()
+    ctx.moveTo(0, ruler + 0.5)
+    ctx.lineTo(width, ruler + 0.5)
+    ctx.moveTo(ruler + 0.5, 0)
+    ctx.lineTo(ruler + 0.5, height)
+    ctx.stroke()
+    this.paintRuler(ctx, {
+      horizontal: true,
+      origin: originX,
+      spanPx: labelW,
+      spanMm: this.snapshot.widthMm,
+      pxPerMm: pxPerMmX,
+      viewStart: ruler,
+      viewEnd: width,
+      ruler,
+      ink,
+      muted,
+      accent,
+    })
+    this.paintRuler(ctx, {
+      horizontal: false,
+      origin: originY,
+      spanPx: labelH,
+      spanMm: this.snapshot.heightMm,
+      pxPerMm: pxPerMmY,
+      viewStart: ruler,
+      viewEnd: height,
+      ruler,
+      ink,
+      muted,
+      accent,
+    })
     ctx.fillStyle = bar
     ctx.fillRect(0, 0, ruler, ruler)
+    ctx.strokeStyle = muted
+    ctx.strokeRect(0.5, 0.5, ruler - 1, ruler - 1)
     ctx.fillStyle = muted
-    ctx.font = '9px ui-sans-serif, sans-serif'
+    ctx.font = '10px ui-sans-serif, sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.fillText('мм', ruler / 2, ruler / 2)
+  }
+
+  private paintRuler(
+    ctx: CanvasRenderingContext2D,
+    input: {
+      horizontal: boolean
+      origin: number
+      spanPx: number
+      spanMm: number
+      pxPerMm: number
+      viewStart: number
+      viewEnd: number
+      ruler: number
+      ink: string
+      muted: string
+      accent: string
+    },
+  ) {
+    const marks = rulerLayout({
+      startMm: (input.viewStart - input.origin) / input.pxPerMm,
+      endMm: (input.viewEnd - input.origin) / input.pxPerMm,
+      pxPerMm: input.pxPerMm,
+      originPx: input.origin,
+      labelPx: input.spanPx,
+      labelMm: input.spanMm,
+    })
+    let lastLabelEnd = input.ruler + 4
+    for (const mark of marks) {
+      if (mark.x < input.viewStart - 0.5 || mark.x > input.viewEnd + 0.5) continue
+      const tick = mark.rank === 'edge' || mark.rank === 'label' ? 12 : mark.rank === 'mid' ? 8 : 4
+      ctx.strokeStyle = mark.rank === 'edge' ? input.accent : input.muted
+      ctx.beginPath()
+      if (input.horizontal) {
+        ctx.moveTo(mark.x + 0.5, input.ruler)
+        ctx.lineTo(mark.x + 0.5, input.ruler - tick)
+      } else {
+        ctx.moveTo(input.ruler, mark.x + 0.5)
+        ctx.lineTo(input.ruler - tick, mark.x + 0.5)
+      }
+      ctx.stroke()
+      if (mark.rank !== 'label' && mark.rank !== 'edge') continue
+      const text = Number.isInteger(mark.mm) ? String(mark.mm) : mark.mm.toFixed(1)
+      const width = ctx.measureText(text).width
+      ctx.fillStyle = mark.rank === 'edge' ? input.accent : input.ink
+      ctx.font = '11px ui-sans-serif, sans-serif'
+      if (input.horizontal) {
+        const left = mark.x - width / 2
+        if (left < lastLabelEnd) continue
+        if (left < input.ruler + 2 || mark.x + width / 2 > input.viewEnd - 2) continue
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'top'
+        ctx.fillText(text, mark.x, 3)
+        lastLabelEnd = mark.x + width / 2 + 6
+      } else {
+        if (mark.x - 8 < lastLabelEnd) continue
+        if (mark.x < input.ruler + 10 || mark.x > input.viewEnd - 8) continue
+        ctx.textAlign = 'right'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(text, input.ruler - 14, mark.x)
+        lastLabelEnd = mark.x + 10
+      }
+    }
   }
 
   private keyDown(event: KeyboardEvent) {
@@ -1604,6 +1751,23 @@ function readDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error('read'))
     reader.readAsDataURL(file)
   })
+}
+
+function readGridPrefs(): Pick<EditorState, 'gridOn' | 'gridStep' | 'snapGrid'> {
+  const fallback = { gridOn: false, gridStep: 1, snapGrid: false }
+  try {
+    if (typeof localStorage === 'undefined') return fallback
+    const raw = localStorage.getItem('metka.grid')
+    if (!raw) return fallback
+    const data = JSON.parse(raw) as { gridOn?: boolean; gridStep?: number; snapGrid?: boolean }
+    return {
+      gridOn: !!data.gridOn,
+      gridStep: normalizeGridStep(Number(data.gridStep)),
+      snapGrid: !!data.snapGrid,
+    }
+  } catch {
+    return fallback
+  }
 }
 
 export const engine = new EditorEngine()

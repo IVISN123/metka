@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ImageEncoder, PageColorType, findPrintTask, getPrinterMetaById } from '@mmote/niimbluelib'
 import { rfidFromClient } from './diag'
-import { metaFor, presetSections, resolvePrintTask, suggestedTask } from './presets'
+import { PRESETS, metaFor, presetGroup, presetSections, resolvePrintTask, suggestedTask } from './presets'
 import {
   checkFirmware,
   firmwareFileModel,
@@ -91,6 +91,10 @@ describe('B21 Pro profile', () => {
     expect(sections[1]?.items.map((item) => item.id)).toContain('12x40')
     expect(presetSections('D110').map((section) => section.id)).toEqual(['rest'])
     expect(presetSections('D110')[0]?.items.some((item) => item.id === '12x40')).toBe(true)
+    expect(new Set(PRESETS.map((preset) => preset.id)).size).toBe(PRESETS.length)
+    expect(presetGroup('50x30')).toBe('card')
+    expect(presetGroup('20x10')).toBe('card')
+    expect(presetGroup('12x40')).toBe('tape')
   })
 
   it('keeps 1-bit printing unless this task can do gray or red', () => {

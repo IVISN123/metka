@@ -16,5 +16,7 @@ export const BUNDLED_FONTS: { family: string; weight: number }[] = [
   { family: "Exo 2", weight: 400 },
   { family: "Noto Sans", weight: 400 },
   { family: "Noto Serif", weight: 400 },
-  { family: "Fira Sans", weight: 400 }
+  { family: "Fira Sans", weight: 400 },
+  { family: "OpenGOST type A", weight: 400 },
+  { family: "OpenGOST type B", weight: 400 }
 ]
