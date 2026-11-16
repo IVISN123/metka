@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { engine } from '../engine/editor'
 import { parseCsv, seriesValues } from '../lib/csv'
+import { canBindSeries } from '../lib/editor-ui'
 import { toast } from '../toast'
 import { useI18n } from './state'
 import { useEngine } from './Stage'
@@ -24,10 +25,11 @@ export function BatchDialog({
   const [csvText, setCsvText] = useState('serial,name\n01,Камера\n02,Камера')
   const parsed = parseCsv(csvText)
   const values = seriesValues(prefix, from, to, pad)
+  const seriesOk = canBindSeries(state.selected?.kind)
 
   const armSeries = () => {
-    if (!state.selectedId || (state.selected?.kind !== 'text' && state.selected?.kind !== 'qr' && state.selected?.kind !== 'barcode' && state.selected?.kind !== 'datetime')) {
-      toast(t('noSelection'))
+    if (!seriesOk || !state.selectedId) {
+      toast(t('batchNeed'))
       return
     }
     if (values.length >= 500) toast(t('limit500'))
@@ -39,15 +41,18 @@ export function BatchDialog({
       <div className="flex flex-col gap-4 p-4 sm:p-5">
         <p className="text-sm leading-6 text-[var(--muted)]">{t('placeholders')}</p>
         <div className="flex gap-2">
-          <Button variant={mode === 'series' ? 'accent' : 'ghost'} onClick={() => setMode('series')}>
+          <Button variant={mode === 'series' ? 'accent' : 'ghost'} className="flex-1" onClick={() => setMode('series')}>
             {t('series')}
           </Button>
-          <Button variant={mode === 'csv' ? 'accent' : 'ghost'} onClick={() => setMode('csv')}>
+          <Button variant={mode === 'csv' ? 'accent' : 'ghost'} className="flex-1" onClick={() => setMode('csv')}>
             {t('csv')}
           </Button>
         </div>
         {mode === 'series' ? (
           <>
+            <p className={`text-sm leading-6 ${seriesOk ? '' : 'text-[var(--danger)]'}`}>
+              {seriesOk && state.selected ? t('batchTarget', { name: state.selected.name }) : t('batchNeed')}
+            </p>
             <div className="grid grid-cols-2 gap-3">
               <Field label={t('prefix')}>
                 <TextInput value={prefix} onChange={(event) => setPrefix(event.target.value)} />
@@ -78,7 +83,7 @@ export function BatchDialog({
               >
                 {t('applyRow')}
               </Button>
-              <Button variant="primary" onClick={armSeries}>
+              <Button variant="primary" disabled={!seriesOk} onClick={armSeries}>
                 {t('printSeries')}
               </Button>
             </div>
@@ -92,7 +97,7 @@ export function BatchDialog({
               rows={8}
               className="w-full rounded-xl border border-[var(--border)] bg-transparent px-3 py-2 font-mono text-sm outline-none focus:border-[var(--accent)]"
             />
-            <label className="text-sm font-bold text-[var(--accent)]">
+            <label className="inline-flex h-11 cursor-pointer items-center rounded-full border border-[var(--border)] px-4 text-sm font-bold hover:bg-[var(--hover)]">
               {t('import')}
               <input
                 type="file"

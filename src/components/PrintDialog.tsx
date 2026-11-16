@@ -7,6 +7,7 @@ import { formatPrintError } from '../lib/print-errors'
 import { LABEL_TYPES, metaFor, resolvePrintTask, suggestedTask, taskNames } from '../lib/presets'
 import { renderDocumentThermal } from '../lib/render'
 import { browserSupport } from '../lib/browser'
+import { labelWord } from '../lib/editor-ui'
 import { mmToPx, modelLabel } from '../lib/units'
 import { printer } from '../printer/controller'
 import { toast } from '../toast'
@@ -14,7 +15,7 @@ import type { I18nKey } from '../i18n'
 import type { Sharpness } from '../types'
 import { useI18n } from './state'
 import { useEngine } from './Stage'
-import { Button, Field, Modal, SelectInput, Slider, TextInput } from './ui'
+import { Button, CheckRow, Field, Modal, SelectInput, Slider, TextInput } from './ui'
 
 export type BatchJob = { rows: Record<string, string>[]; targetId: string | null } | null
 
@@ -124,7 +125,22 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
   }
 
   return (
-    <Modal title={t('print')} closeLabel={t('close')} onClose={onClose}>
+    <Modal
+      title={t('print')}
+      closeLabel={t('close')}
+      onClose={onClose}
+      footer={
+        <div className="flex flex-col gap-2 border-t border-[var(--border)] bg-[var(--card)] px-4 py-3 sm:px-5">
+          <p className="text-sm font-bold" data-testid="label-count">
+            {t('willPrint', { n: labelCount, word: labelWord(labelCount, lang) })}
+          </p>
+          {rangeError && <p className="text-xs leading-5 text-[var(--danger)]">{t('pageRangeBad')}</p>}
+          <Button variant="primary" className="w-full" disabled={link.printing || !state.ready || rangeError} onClick={() => void send()}>
+            {t('sendPrint')}
+          </Button>
+        </div>
+      }
+    >
       <div className="flex flex-col gap-4 p-4 sm:p-5">
         <div className="rounded-2xl border border-[var(--border)] p-3">
           <div className="flex items-center justify-between gap-3">
@@ -159,90 +175,6 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
               </Button>
             )}
           </div>
-          <button type="button" className="mt-3 text-left text-sm font-black text-[var(--danger)]" onClick={() => setFwOpen((open) => !open)}>
-            {t('firmwareFlash')}
-          </button>
-          {fwOpen && (
-            <div className="mt-2 flex flex-col gap-2 rounded-2xl border-2 border-[var(--danger)] p-3">
-              <p className="text-sm font-bold leading-5 text-[var(--danger)]">{t('flashLead')}</p>
-              <p className="text-xs leading-5 text-[var(--text)]">{t('flashWarn')}</p>
-              <p className="text-xs leading-5">
-                {t('firmware')}: {link.firmware || '—'} · {t('hardware')}: {link.hardware || '—'}
-              </p>
-              <p className="text-xs leading-5">
-                <a className="font-bold text-[var(--accent)] underline" href="https://fw.niim.blue/stable/D11_H/" target="_blank" rel="noreferrer">
-                  {t('flashLink')}
-                </a>
-                {' · '}
-                <a className="font-bold text-[var(--accent)] underline" href="https://fw.niim.blue/testing/D11_H/D11_H_4.28.bin" target="_blank" rel="noreferrer">
-                  {t('flashLinkTest')}
-                </a>
-              </p>
-              <label className="text-xs font-bold text-[var(--muted)]">
-                {t('flashFile')}
-                <input
-                  type="file"
-                  accept=".bin,application/octet-stream"
-                  className="mt-1 block w-full text-sm font-bold text-[var(--text)]"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0]
-                    event.target.value = ''
-                    if (!file) return
-                    void file.arrayBuffer().then((buffer) => {
-                      const bytes = new Uint8Array(buffer)
-                      setFwData(bytes)
-                      setFwName(file.name)
-                      const named = file.name.match(/(\d+\.\d+)/)
-                      if (bytes.length >= 0x1c && bytes[0] === 0x18) {
-                        const ver = ((bytes[0x15] ?? 0) << 8) + (bytes[0x14] ?? 0)
-                        setFwVersion((ver / 100).toFixed(2))
-                      } else if (named?.[1]) setFwVersion(named[1])
-                    })
-                  }}
-                />
-              </label>
-              {fwName && <p className="truncate text-xs font-bold">{fwName}</p>}
-              <label className="text-xs font-bold text-[var(--muted)]">
-                {t('flashVersion')}
-                <input
-                  className="mt-1 h-11 w-full rounded-xl border-2 border-[var(--border)] bg-[var(--field)] px-3 text-base font-bold text-[var(--text)]"
-                  value={fwVersion}
-                  onChange={(event) => setFwVersion(event.target.value)}
-                />
-              </label>
-              <Button
-                className="!bg-[var(--danger)] !text-white"
-                disabled={link.status !== 'connected' || link.printing || fwProgress !== ''}
-                onClick={() => {
-                  if (!fwData) {
-                    toast(t('flashNeedFile'))
-                    return
-                  }
-                  if (!/^\d+\.\d+$/.test(fwVersion.trim())) {
-                    toast(t('flashBadVersion'))
-                    return
-                  }
-                  if (!window.confirm(t('flashConfirm'))) return
-                  setFwProgress('…')
-                  void printer
-                    .flashFirmware(fwData, fwVersion.trim(), (current, total) => setFwProgress(`${current}/${total}`))
-                    .then(() => {
-                      setFwProgress('')
-                      setFwData(null)
-                      setFwName('')
-                      toast(t('flashDone'))
-                    })
-                    .catch((error: unknown) => {
-                      setFwProgress('')
-                      const message = error instanceof Error ? error.message : String(error)
-                      toast(message === 'notConnected' ? t('notConnected') : message === 'badVersion' ? t('flashBadVersion') : message)
-                    })
-                }}
-              >
-                {fwProgress ? fwProgress : t('flashBurn')}
-              </Button>
-            </div>
-          )}
           {!support.bluetooth && <p className="mt-2 text-xs text-[var(--muted)]">{t('bluetoothMissing')}</p>}
           {!support.serial && <p className="mt-1 text-xs text-[var(--muted)]">{t('serialMissing')}</p>}
         </div>
@@ -267,8 +199,9 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
           </SelectInput>
           <span className="mt-1 block text-xs text-[var(--muted)]">{t('sharpHint')}</span>
         </Field>
-        <Field label={`${t('density')} ${state.density}`}>
+        <Field label={t('density')}>
           <Slider
+            label={t('density')}
             min={meta?.densityMin ?? 1}
             max={meta?.densityMax ?? 5}
             value={state.density}
@@ -324,10 +257,9 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
             <option value="end">{t('alignEnd')}</option>
           </SelectInput>
         </Field>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={state.taskAuto} onChange={(event) => engine.setTask(state.task, event.target.checked)} />
+        <CheckRow checked={state.taskAuto} onChange={(checked) => engine.setTask(state.task, checked)}>
           {t('autoTask')}
-        </label>
+        </CheckRow>
         <Field label={t('printTask')}>
           <SelectInput value={effectiveTask} onChange={(event) => engine.setTask(event.target.value, false)}>
             {taskNames().map((name) => (
@@ -355,9 +287,6 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
             </div>
           </div>
         )}
-        <p className="text-sm font-bold" data-testid="label-count">
-          {t('willPrint', { n: labelCount })}
-        </p>
         {hasNumber && !rangeError && (
           <p className="text-xs leading-5 text-[var(--muted)]" data-testid="page-order">
             {t('pageOrder', { list: sequence.slice(0, 24).join(', ') + (sequence.length > 24 ? '…' : '') })}
@@ -395,6 +324,90 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
               className="h-40 w-full resize-y rounded-xl border border-[var(--border)] bg-transparent p-2 font-mono text-[11px] leading-4"
               value={link.packetLog || t('noPacketLog')}
             />
+            <button type="button" className="text-left text-sm font-bold text-[var(--danger)]" onClick={() => setFwOpen((open) => !open)}>
+              {t('firmwareFlash')}
+            </button>
+            {fwOpen && (
+              <div className="flex flex-col gap-2 rounded-2xl border-2 border-[var(--danger)] p-3">
+                <p className="text-sm font-bold leading-5 text-[var(--danger)]">{t('flashLead')}</p>
+                <p className="text-xs leading-5 text-[var(--text)]">{t('flashWarn')}</p>
+                <p className="text-xs leading-5">
+                  {t('firmware')}: {link.firmware || '—'} · {t('hardware')}: {link.hardware || '—'}
+                </p>
+                <p className="text-xs leading-5">
+                  <a className="font-bold text-[var(--accent)] underline" href="https://fw.niim.blue/stable/D11_H/" target="_blank" rel="noreferrer">
+                    {t('flashLink')}
+                  </a>
+                  {' · '}
+                  <a className="font-bold text-[var(--accent)] underline" href="https://fw.niim.blue/testing/D11_H/D11_H_4.28.bin" target="_blank" rel="noreferrer">
+                    {t('flashLinkTest')}
+                  </a>
+                </p>
+                <label className="text-xs font-bold text-[var(--muted)]">
+                  {t('flashFile')}
+                  <input
+                    type="file"
+                    accept=".bin,application/octet-stream"
+                    className="mt-1 block w-full text-sm font-bold text-[var(--text)]"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0]
+                      event.target.value = ''
+                      if (!file) return
+                      void file.arrayBuffer().then((buffer) => {
+                        const bytes = new Uint8Array(buffer)
+                        setFwData(bytes)
+                        setFwName(file.name)
+                        const named = file.name.match(/(\d+\.\d+)/)
+                        if (bytes.length >= 0x1c && bytes[0] === 0x18) {
+                          const ver = ((bytes[0x15] ?? 0) << 8) + (bytes[0x14] ?? 0)
+                          setFwVersion((ver / 100).toFixed(2))
+                        } else if (named?.[1]) setFwVersion(named[1])
+                      })
+                    }}
+                  />
+                </label>
+                {fwName && <p className="truncate text-xs font-bold">{fwName}</p>}
+                <label className="text-xs font-bold text-[var(--muted)]">
+                  {t('flashVersion')}
+                  <input
+                    className="mt-1 h-11 w-full rounded-xl border-2 border-[var(--border)] bg-[var(--field)] px-3 text-base font-bold text-[var(--text)]"
+                    value={fwVersion}
+                    onChange={(event) => setFwVersion(event.target.value)}
+                  />
+                </label>
+                <Button
+                  className="!bg-[var(--danger)] !text-white"
+                  disabled={link.status !== 'connected' || link.printing || fwProgress !== ''}
+                  onClick={() => {
+                    if (!fwData) {
+                      toast(t('flashNeedFile'))
+                      return
+                    }
+                    if (!/^\d+\.\d+$/.test(fwVersion.trim())) {
+                      toast(t('flashBadVersion'))
+                      return
+                    }
+                    if (!window.confirm(t('flashConfirm'))) return
+                    setFwProgress('…')
+                    void printer
+                      .flashFirmware(fwData, fwVersion.trim(), (current, total) => setFwProgress(`${current}/${total}`))
+                      .then(() => {
+                        setFwProgress('')
+                        setFwData(null)
+                        setFwName('')
+                        toast(t('flashDone'))
+                      })
+                      .catch((error: unknown) => {
+                        setFwProgress('')
+                        const message = error instanceof Error ? error.message : String(error)
+                        toast(message === 'notConnected' ? t('notConnected') : message === 'badVersion' ? t('flashBadVersion') : message)
+                      })
+                  }}
+                >
+                  {fwProgress ? fwProgress : t('flashBurn')}
+                </Button>
+              </div>
+            )}
             <Button
               onClick={() => {
                 const text = [
@@ -423,9 +436,6 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
             </Button>
           </div>
         )}
-        <Button variant="primary" disabled={link.printing || !state.ready || rangeError} onClick={() => void send()}>
-          {t('sendPrint')}
-        </Button>
       </div>
     </Modal>
   )

@@ -112,6 +112,7 @@ export type SelectedInfo = {
   prefix?: string
   suffix?: string
   pad?: number
+  frame?: { x: number; y: number; w: number; h: number }
 }
 
 export type EditorState = {

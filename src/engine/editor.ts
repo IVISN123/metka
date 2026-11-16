@@ -25,6 +25,7 @@ import { formatPageLabel, parsePageRange } from '../lib/pages'
 import { metaFor, suggestedTask } from '../lib/presets'
 import { ensureFontsReady } from '../lib/fonts'
 import { readAutosave } from '../lib/storage'
+import { boxToMm, matchEditorShortcut, originPoint, pinchZoom, topLeftBox, touchDistance } from '../lib/editor-ui'
 import { clamp, formatDate, mmToPx, uid, verticalize } from '../lib/units'
 
 type GuideSet = { vertical: number[]; horizontal: number[] }
@@ -71,6 +72,7 @@ export class EditorEngine {
   private space = false
   private panning = false
   private lastPan = { x: 0, y: 0 }
+  private pinch: { dist: number; zoom: number } | null = null
   private observer: ResizeObserver | null = null
   private onKeyDown = (event: KeyboardEvent) => this.keyDown(event)
   private onKeyUp = (event: KeyboardEvent) => {
@@ -83,6 +85,31 @@ export class EditorEngine {
     if (file?.type.startsWith('image/')) void this.addImageFile(file)
   }
   private onDragOver = (event: DragEvent) => event.preventDefault()
+  private onTouchStart = (event: TouchEvent) => {
+    if (event.touches.length !== 2 || !this.canvas) return
+    const a = event.touches[0]
+    const b = event.touches[1]
+    if (!a || !b) return
+    this.pinch = { dist: touchDistance(a, b), zoom: this.canvas.getZoom() }
+    this.panning = false
+  }
+  private onTouchMove = (event: TouchEvent) => {
+    if (event.touches.length !== 2 || !this.pinch || !this.canvas || !this.host) return
+    const a = event.touches[0]
+    const b = event.touches[1]
+    if (!a || !b) return
+    event.preventDefault()
+    const zoom = pinchZoom(this.pinch.dist, touchDistance(a, b), this.pinch.zoom)
+    const rect = this.host.getBoundingClientRect()
+    const x = (a.clientX + b.clientX) / 2 - rect.left
+    const y = (a.clientY + b.clientY) / 2 - rect.top
+    this.canvas.zoomToPoint(new Point(x, y), zoom)
+    this.userPanned = true
+    this.commit({ zoom })
+  }
+  private onTouchEnd = (event: TouchEvent) => {
+    if (event.touches.length < 2) this.pinch = null
+  }
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener)
@@ -192,7 +219,8 @@ export class EditorEngine {
     })
     canvas.on('mouse:down', (opt) => {
       const event = opt.e
-      if (this.space || ('button' in event && event.button === 1) || ('altKey' in event && event.altKey && !opt.target)) {
+      const touch = 'pointerType' in event && event.pointerType === 'touch'
+      if (this.space || ('button' in event && event.button === 1) || ('altKey' in event && event.altKey && !opt.target) || (touch && !opt.target)) {
         this.panning = true
         canvas.selection = false
         this.lastPan = { x: 'clientX' in event ? event.clientX : 0, y: 'clientY' in event ? event.clientY : 0 }
@@ -225,6 +253,10 @@ export class EditorEngine {
     window.addEventListener('paste', this.onPaste)
     host.addEventListener('dragover', this.onDragOver)
     host.addEventListener('drop', this.onDrop)
+    host.addEventListener('touchstart', this.onTouchStart, { passive: true })
+    host.addEventListener('touchmove', this.onTouchMove, { passive: false })
+    host.addEventListener('touchend', this.onTouchEnd)
+    host.addEventListener('touchcancel', this.onTouchEnd)
   }
 
   private unbind() {
@@ -233,6 +265,10 @@ export class EditorEngine {
     window.removeEventListener('paste', this.onPaste)
     this.host?.removeEventListener('dragover', this.onDragOver)
     this.host?.removeEventListener('drop', this.onDrop)
+    this.host?.removeEventListener('touchstart', this.onTouchStart)
+    this.host?.removeEventListener('touchmove', this.onTouchMove)
+    this.host?.removeEventListener('touchend', this.onTouchEnd)
+    this.host?.removeEventListener('touchcancel', this.onTouchEnd)
   }
 
   private resize() {
@@ -774,6 +810,38 @@ export class EditorEngine {
     this.pushHistory()
   }
 
+  setFrame(patch: { xMm?: number; yMm?: number; wMm?: number; hMm?: number }) {
+    const obj = this.single()
+    if (!obj || !this.canvas) return
+    const dpi = this.snapshot.dpi
+    const current = topLeftBox(
+      obj.left ?? 0,
+      obj.top ?? 0,
+      obj.width ?? 0,
+      obj.height ?? 0,
+      obj.scaleX ?? 1,
+      obj.scaleY ?? 1,
+      obj.originX,
+      obj.originY,
+    )
+    const next = {
+      x: patch.xMm !== undefined && Number.isFinite(patch.xMm) ? mmToPx(patch.xMm, dpi) : current.x,
+      y: patch.yMm !== undefined && Number.isFinite(patch.yMm) ? mmToPx(patch.yMm, dpi) : current.y,
+      w: patch.wMm !== undefined && Number.isFinite(patch.wMm) ? Math.max(1, mmToPx(Math.max(0.2, patch.wMm), dpi)) : Math.max(1, current.w),
+      h: patch.hMm !== undefined && Number.isFinite(patch.hMm) ? Math.max(1, mmToPx(Math.max(0.2, patch.hMm), dpi)) : Math.max(1, current.h),
+    }
+    const baseW = Math.abs(obj.width || 0) > 0.01 ? Math.abs(obj.width || 1) : 1
+    const baseH = Math.abs(obj.height || 0) > 0.01 ? Math.abs(obj.height || 1) : 1
+    obj.set({
+      scaleX: ((obj.scaleX ?? 1) < 0 ? -1 : 1) * (next.w / baseW),
+      scaleY: ((obj.scaleY ?? 1) < 0 ? -1 : 1) * (next.h / baseH),
+      ...originPoint(next.x, next.y, next.w, next.h, obj.originX, obj.originY),
+    })
+    obj.setCoords()
+    this.canvas.requestRenderAll()
+    this.pushHistory()
+  }
+
   setSize(widthMm: number, heightMm: number, dpi?: number) {
     const width = clamp(widthMm, 8, 120)
     const height = clamp(heightMm, 8, 200)
@@ -932,7 +1000,8 @@ export class EditorEngine {
     if (!this.canvas) return
     const cw = this.canvas.getWidth()
     const ch = this.canvas.getHeight()
-    const zoom = clamp(Math.min((cw - 48) / this.pxW, (ch - 48) / this.pxH), 0.2, 10)
+    const margin = 88
+    const zoom = clamp(Math.min((cw - margin) / this.pxW, (ch - margin) / this.pxH), 0.2, 10)
     const tx = (cw - this.pxW * zoom) / 2
     const ty = (ch - this.pxH * zoom) / 2
     this.canvas.setViewportTransform([zoom, 0, 0, zoom, tx, ty])
@@ -1027,9 +1096,24 @@ export class EditorEngine {
       }
     })
     const only = active.length === 1 ? active[0] : undefined
+    const frame = only
+      ? boxToMm(
+          topLeftBox(
+            only.left ?? 0,
+            only.top ?? 0,
+            only.width ?? 0,
+            only.height ?? 0,
+            only.scaleX ?? 1,
+            only.scaleY ?? 1,
+            only.originX,
+            only.originY,
+          ),
+          this.snapshot.dpi,
+        )
+      : undefined
     this.commit({
       layers,
-      selected: only ? describe(only) : null,
+      selected: only ? { ...describe(only), frame } : null,
       selectedId: only ? (readMeta(only)?.id ?? null) : null,
       multi: active.length > 1 ? active.length : 0,
     })
@@ -1136,59 +1220,40 @@ export class EditorEngine {
 
   private keyDown(event: KeyboardEvent) {
     if (typingTarget(event.target) || !this.canvas) return
-    const meta = event.metaKey || event.ctrlKey
-    if (event.code === 'Space') {
+    if (typeof document !== 'undefined' && document.querySelector('[role="dialog"]')) return
+    const action = matchEditorShortcut({
+      key: event.key,
+      code: event.code,
+      meta: event.metaKey || event.ctrlKey,
+      shift: event.shiftKey,
+      alt: event.altKey,
+    })
+    if (!action) return
+    if (action.type === 'pan') {
       this.space = true
       event.preventDefault()
       return
     }
-    if (meta && event.key.toLowerCase() === 'z' && !event.shiftKey) {
-      event.preventDefault()
-      this.undo()
-      return
-    }
-    if (meta && (event.key.toLowerCase() === 'y' || (event.key.toLowerCase() === 'z' && event.shiftKey))) {
-      event.preventDefault()
-      this.redo()
-      return
-    }
-    if (meta && event.key.toLowerCase() === 'd') {
-      event.preventDefault()
-      void this.duplicate()
-      return
-    }
-    if (meta && event.key.toLowerCase() === 'c') {
-      this.copy()
-      return
-    }
-    if (meta && event.key.toLowerCase() === 'a') {
-      event.preventDefault()
+    if (action.type !== 'copy') event.preventDefault()
+    if (action.type === 'undo') this.undo()
+    else if (action.type === 'redo') this.redo()
+    else if (action.type === 'duplicate') void this.duplicate()
+    else if (action.type === 'copy') this.copy()
+    else if (action.type === 'selectAll') {
       const objects = this.userObjects().filter((obj) => obj.visible !== false)
       if (objects.length === 1 && objects[0]) this.canvas.setActiveObject(objects[0])
       else if (objects.length > 1) this.canvas.setActiveObject(new ActiveSelection(objects, { canvas: this.canvas }))
       this.canvas.requestRenderAll()
       this.syncSelection()
-      return
-    }
-    if (event.key === 'Delete' || event.key === 'Backspace') {
-      event.preventDefault()
-      this.deleteSelected()
-      return
-    }
-    const step = event.shiftKey ? 10 : 1
-    if (event.key === 'ArrowLeft') {
-      event.preventDefault()
-      this.nudge(-step, 0)
-    } else if (event.key === 'ArrowRight') {
-      event.preventDefault()
-      this.nudge(step, 0)
-    } else if (event.key === 'ArrowUp') {
-      event.preventDefault()
-      this.nudge(0, -step)
-    } else if (event.key === 'ArrowDown') {
-      event.preventDefault()
-      this.nudge(0, step)
-    }
+    } else if (action.type === 'delete') this.deleteSelected()
+    else if (action.type === 'fit') this.fit()
+    else if (action.type === 'zoomIn') this.zoomBy(1.15)
+    else if (action.type === 'zoomOut') this.zoomBy(1 / 1.15)
+    else if (action.type === 'deselect') {
+      this.canvas.discardActiveObject()
+      this.canvas.requestRenderAll()
+      this.syncSelection()
+    } else if (action.type === 'nudge') this.nudge(action.dx, action.dy)
   }
 
   private pasteEvent(event: ClipboardEvent) {
