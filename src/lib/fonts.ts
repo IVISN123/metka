@@ -1,8 +1,9 @@
+import { BUNDLED_FONTS } from './bundled-fonts'
 import { FONTS } from './presets'
 import { deleteStoredFont, listStoredFonts, saveStoredFont, type StoredFont } from './storage'
 import { uid } from './units'
 
-export type FontChoice = { id: string; label: string; family: string; uploaded?: boolean }
+export type FontChoice = { id: string; label: string; family: string; uploaded?: boolean; system?: boolean }
 
 const faces = new Map<string, FontFace>()
 let uploaded: FontChoice[] = []
@@ -39,11 +40,22 @@ async function register(font: StoredFont) {
 
 export async function ensureFontsReady() {
   if (typeof document === 'undefined' || !document.fonts) return
+  const families = [...BUNDLED_FONTS.map((font) => font.family), 'IBM Plex Mono', 'JetBrains Mono']
+  await Promise.all(
+    families.map(async (family) => {
+      try {
+        await document.fonts.load(`400 16px "${family}"`)
+        await document.fonts.load(`500 16px "${family}"`)
+        await document.fonts.load(`700 16px "${family}"`)
+      } catch {
+        /* a missing file falls back to the next face */
+      }
+    }),
+  )
   try {
-    await document.fonts.load('16px "IBM Plex Mono"')
-    await document.fonts.load('16px "JetBrains Mono"')
+    await document.fonts.ready
   } catch {
-    /* the file is still declared in CSS */
+    /* the canvas still draws with whatever is loaded */
   }
   if (uploaded.length > 0) return
   try {

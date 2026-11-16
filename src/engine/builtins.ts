@@ -3,7 +3,7 @@ import { FabricImage, Group, StaticCanvas, Textbox, loadSVGFromString, type Fabr
 import type { LabelDocument } from '../types'
 import { barcodeDataUrl, qrDataUrl } from '../lib/codes'
 import { gimbalDataUrl } from '../lib/gimbal'
-import { iconById } from '../lib/icons'
+import { iconById, symbolSvg } from '../lib/icons'
 import { directionOf, metaFor, suggestedTask } from '../lib/presets'
 import { mmToPx, uid } from '../lib/units'
 
@@ -256,7 +256,8 @@ async function paintStock(scene: StaticCanvas, width: number, height: number) {
 }
 
 async function addLaurel(scene: StaticCanvas, left: number, top: number, target: number, flip: boolean) {
-  const svg = iconById('laurel')?.svg
+  const laurel = iconById('laurel')
+  const svg = laurel ? symbolSvg(laurel, '#000000') : ''
   if (!svg) return
   const group = await svgGroup(svg)
   if (!group) return

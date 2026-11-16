@@ -22,12 +22,27 @@ import { readMeta, writeMeta } from './meta'
 import { translate } from '../i18n'
 import { normalizeDocument } from '../lib/bundle'
 import { barcodeDataUrl, qrDataUrl } from '../lib/codes'
-import { iconById } from '../lib/icons'
+import { iconById, symbolSvg } from '../lib/icons'
 import { MAX_PHOTO_BYTES, MAX_PHOTO_EDGE, historyDepth, targetPhotoSize } from '../lib/limits'
 import { formatPageLabel, parsePageRange } from '../lib/pages'
 import { metaFor, suggestedTask } from '../lib/presets'
 import { ensureFontsReady } from '../lib/fonts'
 import { readAutosave } from '../lib/storage'
+import {
+  alignDelta,
+  boxToMm,
+  defaultCornerMm,
+  distributeDelta,
+  matchEditorShortcut,
+  originPoint,
+  pinchZoom,
+  rulerMarks,
+  topLeftBox,
+  touchDistance,
+  unionBox,
+  type AlignEdge,
+  type AxisBox,
+} from '../lib/editor-ui'
 import { toast } from '../toast'
 import { clamp, clampCopies, clampDpi, clampSize, formatDate, mmToPx, uid, verticalize } from '../lib/units'
 
@@ -75,6 +90,9 @@ export class EditorEngine {
   private space = false
   private panning = false
   private lastPan = { x: 0, y: 0 }
+  private pinch: { dist: number; zoom: number } | null = null
+  private gesture = false
+  private gestureWrote = false
   private observer: ResizeObserver | null = null
   private onKeyDown = (event: KeyboardEvent) => this.keyDown(event)
   private onKeyUp = (event: KeyboardEvent) => {
@@ -87,6 +105,31 @@ export class EditorEngine {
     if (file?.type.startsWith('image/')) void this.addImageFile(file)
   }
   private onDragOver = (event: DragEvent) => event.preventDefault()
+  private onTouchStart = (event: TouchEvent) => {
+    if (event.touches.length !== 2 || !this.canvas) return
+    const a = event.touches[0]
+    const b = event.touches[1]
+    if (!a || !b) return
+    this.pinch = { dist: touchDistance(a, b), zoom: this.canvas.getZoom() }
+    this.panning = false
+  }
+  private onTouchMove = (event: TouchEvent) => {
+    if (event.touches.length !== 2 || !this.pinch || !this.canvas || !this.host) return
+    const a = event.touches[0]
+    const b = event.touches[1]
+    if (!a || !b) return
+    event.preventDefault()
+    const zoom = pinchZoom(this.pinch.dist, touchDistance(a, b), this.pinch.zoom)
+    const rect = this.host.getBoundingClientRect()
+    const x = (a.clientX + b.clientX) / 2 - rect.left
+    const y = (a.clientY + b.clientY) / 2 - rect.top
+    this.canvas.zoomToPoint(new Point(x, y), zoom)
+    this.userPanned = true
+    this.commit({ zoom })
+  }
+  private onTouchEnd = (event: TouchEvent) => {
+    if (event.touches.length < 2) this.pinch = null
+  }
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener)
@@ -201,7 +244,8 @@ export class EditorEngine {
     })
     canvas.on('mouse:down', (opt) => {
       const event = opt.e
-      if (this.space || ('button' in event && event.button === 1) || ('altKey' in event && event.altKey && !opt.target)) {
+      const touch = 'pointerType' in event && event.pointerType === 'touch'
+      if (this.space || ('button' in event && event.button === 1) || ('altKey' in event && event.altKey && !opt.target) || (touch && !opt.target)) {
         this.panning = true
         canvas.selection = false
         this.lastPan = { x: 'clientX' in event ? event.clientX : 0, y: 'clientY' in event ? event.clientY : 0 }
@@ -234,6 +278,10 @@ export class EditorEngine {
     window.addEventListener('paste', this.onPaste)
     host.addEventListener('dragover', this.onDragOver)
     host.addEventListener('drop', this.onDrop)
+    host.addEventListener('touchstart', this.onTouchStart, { passive: true })
+    host.addEventListener('touchmove', this.onTouchMove, { passive: false })
+    host.addEventListener('touchend', this.onTouchEnd)
+    host.addEventListener('touchcancel', this.onTouchEnd)
   }
 
   private unbind() {
@@ -242,6 +290,10 @@ export class EditorEngine {
     window.removeEventListener('paste', this.onPaste)
     this.host?.removeEventListener('dragover', this.onDragOver)
     this.host?.removeEventListener('drop', this.onDrop)
+    this.host?.removeEventListener('touchstart', this.onTouchStart)
+    this.host?.removeEventListener('touchmove', this.onTouchMove)
+    this.host?.removeEventListener('touchend', this.onTouchEnd)
+    this.host?.removeEventListener('touchcancel', this.onTouchEnd)
   }
 
   private resize() {
@@ -280,6 +332,7 @@ export class EditorEngine {
       pageFrom: state.pageFrom,
       pageTo: state.pageTo,
       preview: state.preview,
+      cornerMm: state.cornerMm,
       canvas: this.canvas.toObject(['data']) as Record<string, unknown>,
     }
   }
@@ -292,6 +345,12 @@ export class EditorEngine {
     this.suspend += 1
     this.pxW = mmToPx(doc.widthMm, doc.dpi)
     this.pxH = mmToPx(doc.heightMm, doc.dpi)
+    this.commit({
+      dpi: doc.dpi,
+      widthMm: doc.widthMm,
+      heightMm: doc.heightMm,
+      cornerMm: doc.cornerMm ?? defaultCornerMm(doc.widthMm, doc.heightMm),
+    })
     await this.canvas.loadFromJSON(doc.canvas)
     this.ensurePaper()
     this.canvas.backgroundColor = this.snapshot.workspace
@@ -317,6 +376,7 @@ export class EditorEngine {
       pageFrom: doc.pageFrom ?? 1,
       pageTo: doc.pageTo ?? 1,
       preview: doc.preview,
+      cornerMm: doc.cornerMm ?? defaultCornerMm(doc.widthMm, doc.heightMm),
       dirty,
     })
     this.pushHistory(false)
@@ -353,6 +413,8 @@ export class EditorEngine {
         height,
         originX: 'center',
         originY: 'center',
+        rx: this.cornerPx(),
+        ry: this.cornerPx(),
         fill: '#ffffff',
         selectable: false,
         evented: false,
@@ -363,7 +425,7 @@ export class EditorEngine {
       })
       this.canvas.add(this.paper)
     } else {
-      this.paper.set({ left: width / 2, top: height / 2, width, height, scaleX: 1, scaleY: 1 })
+      this.paper.set({ left: width / 2, top: height / 2, width, height, scaleX: 1, scaleY: 1, rx: this.cornerPx(), ry: this.cornerPx() })
       this.paper.setCoords()
     }
     this.canvas.sendObjectToBack(this.paper)
@@ -471,8 +533,9 @@ export class EditorEngine {
   }
 
   async addIcon(id: string) {
-    const svg = iconById(id)?.svg
-    if (!svg || !this.canvas) return
+    const icon = iconById(id)
+    if (!icon || !this.canvas) return
+    const svg = symbolSvg(icon, '#000000')
     const parsed = await loadSVGFromString(svg)
     const objects = parsed.objects.filter((object): object is FabricObject => object !== null)
     if (objects.length === 0) return
@@ -487,7 +550,7 @@ export class EditorEngine {
       top: center.y,
       scaleX: scale,
       scaleY: scale,
-      data: { id: uid(), kind: 'icon', name: this.named('icon'), iconId: id },
+      data: { id: uid(), kind: 'icon', name: this.lang === 'en' ? icon.en : icon.ru, iconId: id },
     })
     this.place(group)
   }
@@ -720,24 +783,78 @@ export class EditorEngine {
     await this.spawn(this.clip.map((item) => structuredClone(item)), 12)
   }
 
-  align(mode: 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom') {
+  align(mode: AlignEdge) {
     if (!this.canvas) return
-    for (const obj of this.canvas.getActiveObjects()) {
-      if (readMeta(obj)?.kind === 'paper') continue
-      const bounds = obj.getBoundingRect()
-      let dx = 0
-      let dy = 0
-      if (mode === 'left') dx = -bounds.left
-      if (mode === 'center') dx = this.pxW / 2 - (bounds.left + bounds.width / 2)
-      if (mode === 'right') dx = this.pxW - (bounds.left + bounds.width)
-      if (mode === 'top') dy = -bounds.top
-      if (mode === 'middle') dy = this.pxH / 2 - (bounds.top + bounds.height / 2)
-      if (mode === 'bottom') dy = this.pxH - (bounds.top + bounds.height)
-      obj.set({ left: (obj.left ?? 0) + dx, top: (obj.top ?? 0) + dy })
-      obj.setCoords()
+    const objects = this.canvas.getActiveObjects().filter((obj) => readMeta(obj)?.kind !== 'paper')
+    if (objects.length === 0) return
+    const boxes = objects.map((obj) => ({ obj, box: obj.getBoundingRect() }))
+    const bounds: AxisBox =
+      boxes.length === 1
+        ? { left: 0, top: 0, width: this.pxW, height: this.pxH }
+        : unionBox(boxes.map((item) => item.box))
+    for (const item of boxes) {
+      const { dx, dy } = alignDelta(item.box, bounds, mode)
+      item.obj.set({ left: (item.obj.left ?? 0) + dx, top: (item.obj.top ?? 0) + dy })
+      item.obj.setCoords()
     }
     this.canvas.requestRenderAll()
     this.pushHistory()
+  }
+
+  distribute(axis: 'x' | 'y') {
+    if (!this.canvas) return
+    const objects = this.canvas.getActiveObjects().filter((obj) => readMeta(obj)?.kind !== 'paper')
+    if (objects.length < 3) return
+    const boxes = objects.map((obj) => obj.getBoundingRect())
+    const deltas = distributeDelta(boxes, axis)
+    objects.forEach((obj, index) => {
+      const delta = deltas[index] ?? 0
+      obj.set({
+        left: (obj.left ?? 0) + (axis === 'x' ? delta : 0),
+        top: (obj.top ?? 0) + (axis === 'y' ? delta : 0),
+      })
+      obj.setCoords()
+    })
+    this.canvas.requestRenderAll()
+    this.pushHistory()
+  }
+
+  moveLayer(id: string, targetId: string) {
+    if (!this.canvas || !this.paper || id === targetId) return
+    const objects = this.userObjects()
+    const moving = objects.find((obj) => readMeta(obj)?.id === id)
+    const target = objects.find((obj) => readMeta(obj)?.id === targetId)
+    if (!moving || !target) return
+    const next = objects.filter((obj) => obj !== moving)
+    const at = next.indexOf(target)
+    if (at < 0) return
+    next.splice(at, 0, moving)
+    next.forEach((obj, index) => this.canvas?.moveObjectTo(obj, index + 1))
+    if (this.canvas.getObjects().indexOf(this.paper) !== 0) this.canvas.sendObjectToBack(this.paper)
+    this.canvas.requestRenderAll()
+    this.pushHistory()
+  }
+
+  beginGesture() {
+    this.gesture = true
+    this.gestureWrote = false
+  }
+
+  endGesture() {
+    this.gesture = false
+    this.gestureWrote = false
+  }
+
+  setCorner(cornerMm: number) {
+    const next = clamp(cornerMm, 0, 8)
+    this.commit({ cornerMm: Math.round(next * 10) / 10 })
+    this.ensurePaper()
+    this.canvas?.requestRenderAll()
+    this.pushHistory()
+  }
+
+  private cornerPx() {
+    return mmToPx(this.snapshot.cornerMm || 0, this.snapshot.dpi || 203)
   }
 
   order(action: 'forward' | 'backward' | 'front' | 'back') {
@@ -802,14 +919,51 @@ export class EditorEngine {
     this.pushHistory()
   }
 
+  setFrame(patch: { xMm?: number; yMm?: number; wMm?: number; hMm?: number }) {
+    const obj = this.single()
+    if (!obj || !this.canvas) return
+    const dpi = this.snapshot.dpi
+    const current = topLeftBox(
+      obj.left ?? 0,
+      obj.top ?? 0,
+      obj.width ?? 0,
+      obj.height ?? 0,
+      obj.scaleX ?? 1,
+      obj.scaleY ?? 1,
+      obj.originX,
+      obj.originY,
+    )
+    const next = {
+      x: patch.xMm !== undefined && Number.isFinite(patch.xMm) ? mmToPx(patch.xMm, dpi) : current.x,
+      y: patch.yMm !== undefined && Number.isFinite(patch.yMm) ? mmToPx(patch.yMm, dpi) : current.y,
+      w: patch.wMm !== undefined && Number.isFinite(patch.wMm) ? Math.max(1, mmToPx(Math.max(0.2, patch.wMm), dpi)) : Math.max(1, current.w),
+      h: patch.hMm !== undefined && Number.isFinite(patch.hMm) ? Math.max(1, mmToPx(Math.max(0.2, patch.hMm), dpi)) : Math.max(1, current.h),
+    }
+    const baseW = Math.abs(obj.width || 0) > 0.01 ? Math.abs(obj.width || 1) : 1
+    const baseH = Math.abs(obj.height || 0) > 0.01 ? Math.abs(obj.height || 1) : 1
+    obj.set({
+      scaleX: ((obj.scaleX ?? 1) < 0 ? -1 : 1) * (next.w / baseW),
+      scaleY: ((obj.scaleY ?? 1) < 0 ? -1 : 1) * (next.h / baseH),
+      ...originPoint(next.x, next.y, next.w, next.h, obj.originX, obj.originY),
+    })
+    obj.setCoords()
+    this.canvas.requestRenderAll()
+    this.pushHistory()
+  }
+
   setSize(widthMm: number, heightMm: number, dpi?: number) {
     if (!Number.isFinite(widthMm) || !Number.isFinite(heightMm)) return
     const bounded = clampSize(widthMm, heightMm, dpi !== undefined && Number.isFinite(dpi) ? dpi : this.snapshot.dpi)
     if (bounded.dpi !== this.snapshot.dpi) this.applyDpi(bounded.dpi)
     this.pxW = mmToPx(bounded.widthMm, bounded.dpi)
     this.pxH = mmToPx(bounded.heightMm, bounded.dpi)
+    this.commit({
+      widthMm: bounded.widthMm,
+      heightMm: bounded.heightMm,
+      dpi: bounded.dpi,
+      cornerMm: defaultCornerMm(bounded.widthMm, bounded.heightMm),
+    })
     this.ensurePaper()
-    this.commit({ widthMm: bounded.widthMm, heightMm: bounded.heightMm, dpi: bounded.dpi })
     this.pushHistory()
     this.fit()
   }
@@ -874,6 +1028,7 @@ export class EditorEngine {
     }
     this.pxW = mmToPx(this.snapshot.widthMm, dpi)
     this.pxH = mmToPx(this.snapshot.heightMm, dpi)
+    this.commit({ dpi })
     this.ensurePaper()
   }
 
@@ -962,7 +1117,8 @@ export class EditorEngine {
     if (!this.canvas) return
     const cw = this.canvas.getWidth()
     const ch = this.canvas.getHeight()
-    const zoom = clamp(Math.min((cw - 48) / this.pxW, (ch - 48) / this.pxH), 0.2, 10)
+    const margin = 88
+    const zoom = clamp(Math.min((cw - margin) / this.pxW, (ch - margin) / this.pxH), 0.2, 10)
     const tx = (cw - this.pxW * zoom) / 2
     const ty = (ch - this.pxH * zoom) / 2
     this.canvas.setViewportTransform([zoom, 0, 0, zoom, tx, ty])
@@ -983,11 +1139,21 @@ export class EditorEngine {
       this.syncSelection()
       return
     }
+    if (this.gesture && this.gestureWrote && this.histIndex >= 0) {
+      this.history[this.histIndex] = json
+      this.commit({
+        dirty: markDirty ? true : this.snapshot.dirty,
+        contentRev: this.snapshot.contentRev + 1,
+      })
+      this.syncSelection()
+      return
+    }
     this.history = this.history.slice(0, this.histIndex + 1)
     this.history.push(json)
     const depth = historyDepth(json.length)
     while (this.history.length > depth) this.history.shift()
     this.histIndex = this.history.length - 1
+    if (this.gesture) this.gestureWrote = true
     this.commit({
       canUndo: this.histIndex > 0,
       canRedo: false,
@@ -1003,6 +1169,12 @@ export class EditorEngine {
     this.suspend += 1
     this.pxW = mmToPx(doc.widthMm, doc.dpi)
     this.pxH = mmToPx(doc.heightMm, doc.dpi)
+    this.commit({
+      dpi: doc.dpi,
+      widthMm: doc.widthMm,
+      heightMm: doc.heightMm,
+      cornerMm: doc.cornerMm ?? defaultCornerMm(doc.widthMm, doc.heightMm),
+    })
     await this.canvas.loadFromJSON(doc.canvas)
     this.ensurePaper()
     this.suspend -= 1
@@ -1022,6 +1194,7 @@ export class EditorEngine {
       pageFrom: doc.pageFrom ?? 1,
       pageTo: doc.pageTo ?? 1,
       preview: doc.preview,
+      cornerMm: doc.cornerMm ?? defaultCornerMm(doc.widthMm, doc.heightMm),
       canUndo: this.histIndex > 0,
       canRedo: this.histIndex < this.history.length - 1,
       dirty: true,
@@ -1058,9 +1231,24 @@ export class EditorEngine {
       }
     })
     const only = active.length === 1 ? active[0] : undefined
+    const frame = only
+      ? boxToMm(
+          topLeftBox(
+            only.left ?? 0,
+            only.top ?? 0,
+            only.width ?? 0,
+            only.height ?? 0,
+            only.scaleX ?? 1,
+            only.scaleY ?? 1,
+            only.originX,
+            only.originY,
+          ),
+          this.snapshot.dpi,
+        )
+      : undefined
     this.commit({
       layers,
-      selected: only ? describe(only) : null,
+      selected: only ? { ...describe(only), frame } : null,
       selectedId: only ? (readMeta(only)?.id ?? null) : null,
       multi: active.length > 1 ? active.length : 0,
     })
@@ -1162,64 +1350,112 @@ export class EditorEngine {
       ctx.lineTo(width, sy + 0.5)
       ctx.stroke()
     }
+    this.drawLabelChrome(ctx, vpt, width, height)
     ctx.restore()
+  }
+
+  private drawLabelChrome(ctx: CanvasRenderingContext2D, vpt: number[], width: number, height: number) {
+    const zoom = vpt[0] || 1
+    const dpi = this.snapshot.dpi || 203
+    const pxPerMm = (dpi / 25.4) * zoom
+    const originX = vpt[4] ?? 0
+    const originY = vpt[5] ?? 0
+    const labelW = this.pxW * zoom
+    const labelH = this.pxH * zoom
+    const radius = this.cornerPx() * zoom
+    if (radius > 0.5 && labelW > 2 && labelH > 2) {
+      const corner = Math.min(radius, labelW / 2, labelH / 2)
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(originX, originY, labelW, labelH)
+      ctx.roundRect(originX, originY, labelW, labelH, corner)
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.45)'
+      ctx.fill('evenodd')
+      ctx.restore()
+    }
+    const styles = getComputedStyle(document.documentElement)
+    const bar = styles.getPropertyValue('--elev').trim() || '#16181c'
+    const ink = styles.getPropertyValue('--text').trim() || '#f7f9f9'
+    const muted = styles.getPropertyValue('--muted').trim() || '#b8c1c8'
+    const ruler = 26
+    ctx.fillStyle = bar
+    ctx.fillRect(0, 0, width, ruler)
+    ctx.fillRect(0, 0, ruler, height)
+    ctx.strokeStyle = muted
+    ctx.fillStyle = ink
+    ctx.lineWidth = 1
+    ctx.font = '10px ui-sans-serif, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'top'
+    const xMarks = rulerMarks((ruler - originX) / pxPerMm, (width - originX) / pxPerMm, pxPerMm)
+    for (const mark of xMarks) {
+      const sx = originX + mark.mm * pxPerMm
+      if (sx < ruler) continue
+      const tick = mark.level === 10 ? 12 : mark.level === 5 ? 8 : 4
+      ctx.beginPath()
+      ctx.moveTo(sx + 0.5, ruler)
+      ctx.lineTo(sx + 0.5, ruler - tick)
+      ctx.stroke()
+      if (mark.level === 10) ctx.fillText(String(mark.mm), sx, 2)
+    }
+    ctx.textAlign = 'right'
+    ctx.textBaseline = 'middle'
+    const yMarks = rulerMarks((ruler - originY) / pxPerMm, (height - originY) / pxPerMm, pxPerMm)
+    for (const mark of yMarks) {
+      const sy = originY + mark.mm * pxPerMm
+      if (sy < ruler) continue
+      const tick = mark.level === 10 ? 12 : mark.level === 5 ? 8 : 4
+      ctx.beginPath()
+      ctx.moveTo(ruler, sy + 0.5)
+      ctx.lineTo(ruler - tick, sy + 0.5)
+      ctx.stroke()
+      if (mark.level === 10) ctx.fillText(String(mark.mm), ruler - 2, sy)
+    }
+    ctx.fillStyle = bar
+    ctx.fillRect(0, 0, ruler, ruler)
+    ctx.fillStyle = muted
+    ctx.font = '9px ui-sans-serif, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('мм', ruler / 2, ruler / 2)
   }
 
   private keyDown(event: KeyboardEvent) {
     if (typingTarget(event.target) || !this.canvas) return
-    const meta = event.metaKey || event.ctrlKey
-    if (event.code === 'Space') {
+    if (typeof document !== 'undefined' && document.querySelector('[role="dialog"]')) return
+    const action = matchEditorShortcut({
+      key: event.key,
+      code: event.code,
+      meta: event.metaKey || event.ctrlKey,
+      shift: event.shiftKey,
+      alt: event.altKey,
+    })
+    if (!action) return
+    if (action.type === 'pan') {
       this.space = true
       event.preventDefault()
       return
     }
-    if (meta && event.key.toLowerCase() === 'z' && !event.shiftKey) {
-      event.preventDefault()
-      this.undo()
-      return
-    }
-    if (meta && (event.key.toLowerCase() === 'y' || (event.key.toLowerCase() === 'z' && event.shiftKey))) {
-      event.preventDefault()
-      this.redo()
-      return
-    }
-    if (meta && event.key.toLowerCase() === 'd') {
-      event.preventDefault()
-      void this.duplicate()
-      return
-    }
-    if (meta && event.key.toLowerCase() === 'c') {
-      this.copy()
-      return
-    }
-    if (meta && event.key.toLowerCase() === 'a') {
-      event.preventDefault()
+    if (action.type !== 'copy') event.preventDefault()
+    if (action.type === 'undo') this.undo()
+    else if (action.type === 'redo') this.redo()
+    else if (action.type === 'duplicate') void this.duplicate()
+    else if (action.type === 'copy') this.copy()
+    else if (action.type === 'selectAll') {
       const objects = this.userObjects().filter((obj) => obj.visible !== false)
       if (objects.length === 1 && objects[0]) this.canvas.setActiveObject(objects[0])
       else if (objects.length > 1) this.canvas.setActiveObject(new ActiveSelection(objects, { canvas: this.canvas }))
       this.canvas.requestRenderAll()
       this.syncSelection()
-      return
-    }
-    if (event.key === 'Delete' || event.key === 'Backspace') {
-      event.preventDefault()
-      this.deleteSelected()
-      return
-    }
-    const step = event.shiftKey ? 10 : 1
-    if (event.key === 'ArrowLeft') {
-      event.preventDefault()
-      this.nudge(-step, 0)
-    } else if (event.key === 'ArrowRight') {
-      event.preventDefault()
-      this.nudge(step, 0)
-    } else if (event.key === 'ArrowUp') {
-      event.preventDefault()
-      this.nudge(0, -step)
-    } else if (event.key === 'ArrowDown') {
-      event.preventDefault()
-      this.nudge(0, step)
-    }
+    } else if (action.type === 'delete') this.deleteSelected()
+    else if (action.type === 'fit') this.fit()
+    else if (action.type === 'zoomIn') this.zoomBy(1.15)
+    else if (action.type === 'zoomOut') this.zoomBy(1 / 1.15)
+    else if (action.type === 'deselect') {
+      this.canvas.discardActiveObject()
+      this.canvas.requestRenderAll()
+      this.syncSelection()
+    } else if (action.type === 'nudge') this.nudge(action.dx, action.dy)
   }
 
   private pasteEvent(event: ClipboardEvent) {

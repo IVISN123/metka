@@ -1,0 +1,20 @@
+export const BUNDLED_FONTS: { family: string; weight: number }[] = [
+  { family: "Roboto", weight: 400 },
+  { family: "Open Sans", weight: 400 },
+  { family: "PT Sans", weight: 400 },
+  { family: "PT Serif", weight: 400 },
+  { family: "Montserrat", weight: 400 },
+  { family: "Inter", weight: 400 },
+  { family: "Rubik", weight: 400 },
+  { family: "Oswald", weight: 500 },
+  { family: "Roboto Condensed", weight: 400 },
+  { family: "Nunito", weight: 400 },
+  { family: "Manrope", weight: 400 },
+  { family: "IBM Plex Sans", weight: 400 },
+  { family: "Golos Text", weight: 400 },
+  { family: "Unbounded", weight: 400 },
+  { family: "Exo 2", weight: 400 },
+  { family: "Noto Sans", weight: 400 },
+  { family: "Noto Serif", weight: 400 },
+  { family: "Fira Sans", weight: 400 }
+]
