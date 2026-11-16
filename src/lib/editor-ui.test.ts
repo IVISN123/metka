@@ -7,11 +7,14 @@ import {
   classSetsDisplay,
   defaultCornerMm,
   distributeDelta,
+  gridStops,
   labelWord,
   matchEditorShortcut,
+  mmOnLabel,
   originPoint,
   pinchZoom,
-  rulerMarks,
+  rulerLayout,
+  rulerStepMm,
   topLeftBox,
   type ShortcutInput,
 } from './editor-ui'
@@ -94,8 +97,21 @@ describe('pinch and geometry', () => {
     expect(defaultCornerMm(40, 12)).toBe(1.5)
     expect(defaultCornerMm(50, 30)).toBe(2)
     expect(defaultCornerMm(80, 50)).toBe(3)
-    expect(rulerMarks(0, 12, 8).filter((mark) => mark.level === 10).map((mark) => mark.mm)).toEqual([0, 10])
-    expect(rulerMarks(0, 6, 2).some((mark) => mark.level === 1)).toBe(false)
+    expect(rulerStepMm(8)).toBe(5)
+    expect(rulerStepMm(2)).toBeGreaterThanOrEqual(20)
+    const laid = rulerLayout({ startMm: -2, endMm: 42, pxPerMm: 8, originPx: 80, labelPx: 320, labelMm: 40 })
+    const zero = laid.find((mark) => mark.mm === 0)
+    const end = laid.find((mark) => mark.mm === 40)
+    expect(zero?.x).toBe(80)
+    expect(end?.x).toBe(400)
+    expect(end?.rank).toBe('edge')
+    expect(mmOnLabel(40, 80, 320, 40)).toBe(400)
+    const labels = laid.filter((mark) => mark.rank === 'label' || mark.rank === 'edge')
+    for (let index = 1; index < labels.length; index += 1) {
+      const gap = (labels[index]?.x ?? 0) - (labels[index - 1]?.x ?? 0)
+      expect(gap).toBeGreaterThanOrEqual(34)
+    }
+    expect(gridStops(100, 10, 2)).toEqual([0, 20, 40, 60, 80, 100])
   })
 
   it('paints label symbols black for thermal output and finds them in Russian', () => {

@@ -47,6 +47,7 @@ export const PRESETS: Preset[] = [
   { id: '50x20', title: '50×20', widthMm: 50, heightMm: 20, note: { ru: 'прямоугольная', en: 'rectangle' } },
   { id: '50x30', title: '50×30', widthMm: 50, heightMm: 30, note: { ru: 'прямоугольная', en: 'rectangle' } },
   { id: '50x70', title: '50×70', widthMm: 50, heightMm: 70, note: { ru: 'прямоугольная', en: 'rectangle' } },
+  { id: '50x50', title: '50×50', widthMm: 50, heightMm: 50, note: { ru: 'квадрат', en: 'square' } },
   { id: '50x80', title: '50×80', widthMm: 50, heightMm: 80, note: { ru: 'прямоугольная', en: 'rectangle' } },
   { id: '60x40', title: '60×40', widthMm: 60, heightMm: 40, note: { ru: 'прямоугольная', en: 'rectangle' } },
   { id: '75x50', title: '75×50', widthMm: 75, heightMm: 50, note: { ru: 'прямоугольная', en: 'rectangle' } },
@@ -114,6 +115,18 @@ export function matchingPreset(widthMm: number, heightMm: number): Preset | unde
   return PRESETS.find((preset) => preset.widthMm === widthMm && preset.heightMm === heightMm)
 }
 
+const TAPE_IDS = new Set(['12x40', '12x22', '14x30', '14x50', '15x30', '15x50'])
+
+export function presetGroup(id: string): 'tape' | 'card' {
+  return TAPE_IDS.has(id) ? 'tape' : 'card'
+}
+
+export function presetSearchText(preset: Preset): string {
+  return [preset.title, preset.note.ru, preset.note.en, `${preset.widthMm}×${preset.heightMm}`, `${preset.heightMm}×${preset.widthMm}`, `${preset.widthMm}x${preset.heightMm}`]
+    .join(' ')
+    .toLowerCase()
+}
+
 const fileFont = (id: string, label: string, generic: 'sans-serif' | 'serif' | 'monospace') => ({
   id,
   label,
@@ -142,6 +155,8 @@ export const FONTS = [
   fileFont('fira-sans', 'Fira Sans', 'sans-serif'),
   fileFont('plex-mono', 'IBM Plex Mono', 'monospace'),
   fileFont('jetbrains-mono', 'JetBrains Mono', 'monospace'),
+  { id: 'gost-a', label: 'ГОСТ 2.304 А', family: '"OpenGOST type A", sans-serif', system: false as const },
+  { id: 'gost-b', label: 'ГОСТ 2.304 Б', family: '"OpenGOST type B", sans-serif', system: false as const },
   { id: 'arial', label: 'Arial', family: 'Arial, Helvetica, sans-serif', system: true as const },
   { id: 'verdana', label: 'Verdana', family: 'Verdana, Geneva, sans-serif', system: true as const },
   { id: 'tahoma', label: 'Tahoma', family: 'Tahoma, Geneva, sans-serif', system: true as const },
