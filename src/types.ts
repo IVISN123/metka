@@ -193,6 +193,7 @@ export type PrinterSnapshot = {
   lastPrint: string
   error: string
   printing: boolean
+  flashing: boolean
   progress: number
   progressLabel: string
   progressPage: number

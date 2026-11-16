@@ -12,7 +12,7 @@ export type PaperSuggestion = {
   labelType: number | null
 }
 
-export type FirmwareVerdict = { ok: true } | { ok: false; code: 'version' | 'model' | 'major' | 'downgrade' }
+export type FirmwareVerdict = { ok: true; downgrade?: boolean } | { ok: false; code: 'version' | 'model' | 'major' | 'downgrade' }
 
 /**
  * Dots the bitmap is padded to. On B21 Pro the sensor reports 576, while the
@@ -133,12 +133,6 @@ export function shownVersion(raw: string): string {
   return raw.match(/\d+\.\d+/)?.[0] ?? raw
 }
 
-export function firmwareArchive(model: string): string {
-  if (model === 'B21_PRO') return 'https://fw.niim.blue/stable/B21_Pro/'
-  if (model === 'D11_H') return 'https://fw.niim.blue/stable/D11_H/'
-  return 'https://fw.niim.blue/stable/'
-}
-
 /** `B21_Pro_3.13.bin` → `B21_PRO`. A bare `firmware.bin` does not name a model. */
 export function firmwareFileModel(fileName: string): string | null {
   const base = fileName.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') ?? ''
@@ -158,6 +152,8 @@ export function checkFirmware(input: {
   software: string
   fileName: string
   version: string
+  /** Skips only the older-than-installed check. Model and major still refuse. */
+  allowDowngrade?: boolean
 }): FirmwareVerdict {
   if (!/^\d+\.\d+$/.test(input.version.trim())) return { ok: false, code: 'version' }
   const model = input.model.trim().toUpperCase()
@@ -169,7 +165,10 @@ export function checkFirmware(input: {
   if (!file || !hardware) return { ok: false, code: 'major' }
   if (file.major !== hardware.major) return { ok: false, code: 'major' }
   if (software && file.major !== software.major) return { ok: false, code: 'major' }
-  if (software && file.major * 100 + file.minor < software.major * 100 + software.minor) return { ok: false, code: 'downgrade' }
+  if (software && file.major * 100 + file.minor < software.major * 100 + software.minor) {
+    if (!input.allowDowngrade) return { ok: false, code: 'downgrade' }
+    return { ok: true, downgrade: true }
+  }
   return { ok: true }
 }
 
