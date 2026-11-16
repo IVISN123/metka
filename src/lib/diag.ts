@@ -10,6 +10,7 @@ const empty = (): RfidView => ({
   readOk: null,
   widthMm: null,
   heightMm: null,
+  gapMm: null,
 })
 
 export function blankRfid(): RfidView {
@@ -31,19 +32,22 @@ export function rfidFromClient(input: {
     consumablesType: number
     barCode: string
   }
-  paper?: { paperWidth?: number; totalHeight?: number; paperType?: number }
+  paper?: { paperWidth?: number; paperHeight?: number; totalHeight?: number; gapHeight?: number; paperType?: number }
   paperRfidSuccess?: boolean
 }): RfidView {
   const label = input.label
   const paper = input.paper
+  const count = (value: number | undefined) => (value == null || value < 0 ? null : value)
+  const height = paper?.paperHeight ?? (paper?.totalHeight != null && paper.gapHeight != null ? paper.totalHeight - paper.gapHeight : paper?.totalHeight)
   return {
     present: label ? label.tagPresent : null,
-    used: label ? label.usedPaper : null,
-    total: label ? label.allPaper : null,
+    used: label ? count(label.usedPaper) : null,
+    total: label ? count(label.allPaper) : null,
     kind: label?.consumablesType ?? paper?.paperType ?? null,
     barcode: label?.barCode ?? '',
     readOk: input.paperRfidSuccess ?? null,
     widthMm: paper?.paperWidth ?? null,
-    heightMm: paper?.totalHeight ?? null,
+    heightMm: height ?? null,
+    gapMm: paper?.gapHeight ?? null,
   }
 }

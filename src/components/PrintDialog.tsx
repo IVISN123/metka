@@ -6,10 +6,13 @@ import { collatedPages, documentHasPageNumber, parsePageRange } from '../lib/pag
 import { LabelCodeError } from '../lib/codes'
 import { formatPrintError, linkErrorText } from '../lib/print-errors'
 import { LABEL_TYPES, metaFor, resolvePrintTask, suggestedTask, taskNames } from '../lib/presets'
-import { renderDocumentThermal } from '../lib/render'
+import { renderDocumentColor, renderDocumentThermal } from '../lib/render'
+import { checkFirmware, firmwareArchive, inkChoices, labelsRemaining, pageColorFor, shownVersion, suggestionFromRfid, type InkMode } from '../lib/printer-profile'
+import { PageColorType } from '@mmote/niimbluelib'
 import { browserSupport } from '../lib/browser'
 import { labelWord } from '../lib/editor-ui'
 import { mmToPx, modelLabel } from '../lib/units'
+import { runDetectLabelBusy } from '../lib/apply-printer'
 import { printer } from '../printer/controller'
 import { toast } from '../toast'
 import type { I18nKey } from '../i18n'
@@ -30,7 +33,9 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
   const [advanced, setAdvanced] = useState(false)
   const [diag, setDiag] = useState(false)
   const [fwOpen, setFwOpen] = useState(false)
-  const [fwVersion, setFwVersion] = useState('4.28')
+  const [fwVersion, setFwVersion] = useState('')
+  const [ink, setInk] = useState<InkMode>('black')
+  const [reading, setReading] = useState(false)
   const [fwName, setFwName] = useState('')
   const [fwData, setFwData] = useState<Uint8Array | null>(null)
   const [fwProgress, setFwProgress] = useState('')
@@ -48,18 +53,23 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
     manual: state.task,
     detected: link.detectedTask,
     model: link.model || state.model,
+    protocolVersion: link.protocol,
   })
+  const pageColor = pageColorFor(effectiveTask, ink)
+  const colors = inkChoices(effectiveTask)
+  const suggestion = link.status === 'connected' ? suggestionFromRfid(link.rfid) : null
+  const left = labelsRemaining(link.rfid.total, link.rfid.used)
+  const fwModel = (link.model && metaFor(link.model) ? link.model : state.model) || ''
+  const fwHw = shownVersion(link.hardware)
+  const fwSw = shownVersion(link.firmware)
+  const densityMin = link.status === 'connected' && link.densityMin != null ? Math.min(link.densityMin, link.densityMax ?? link.densityMin) : (meta?.densityMin ?? 1)
+  const densityMax = link.status === 'connected' && link.densityMax != null ? Math.max(link.densityMax, link.densityMin ?? link.densityMax) : (meta?.densityMax ?? 5)
+  const allowedTypes = link.status === 'connected' && link.labelTypes.length > 0 ? link.labelTypes : (meta?.paperTypes ?? [])
+  const labelOptions = allowedTypes.length > 0 ? LABEL_TYPES.filter((item) => allowedTypes.includes(item.id)) : LABEL_TYPES
 
   const connect = async (transport: 'bluetooth' | 'serial') => {
     try {
       await printer.connect(transport)
-      const snap = printer.getSnapshot()
-      const editor = engine.getSnapshot()
-      if (snap.model && metaFor(snap.model)) {
-        if (snap.model !== editor.model) engine.setModel(snap.model)
-        else if (snap.dpi && snap.dpi !== editor.dpi) engine.setDpi(snap.dpi)
-        if (snap.detectedTask) engine.setTask(snap.detectedTask, true)
-      }
     } catch {
       const snap = printer.getSnapshot()
       toast(linkErrorText(snap.error || 'printFail', lang))
@@ -76,6 +86,9 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
       const now = new Date()
       const jobs = batch?.rows.length ? batch.rows : [null]
       const numbered = documentHasPageNumber(doc)
+      const mono = pageColor === PageColorType.SingleColor
+      const draw = (next: typeof doc, row?: Record<string, string>, number?: number) =>
+        mono ? renderDocumentThermal(next, row, now, number) : renderDocumentColor(next, row, now, number)
       const pages = []
       let quantity = doc.quantity
       if (numbered) {
@@ -92,14 +105,14 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
         for (const row of jobs) {
           const base = batch?.targetId && row?.value ? applySeriesValue(doc, batch.targetId, row.value) : doc
           for (const number of numbers) {
-            pages.push(await renderDocumentThermal(base, row ?? undefined, now, number))
+            pages.push(await draw(base, row ?? undefined, number))
           }
         }
         quantity = 1
       } else {
         for (const row of jobs) {
           const next = batch?.targetId && row?.value ? applySeriesValue(doc, batch.targetId, row.value) : doc
-          pages.push(await renderDocumentThermal(next, row ?? undefined, now))
+          pages.push(await draw(next, row ?? undefined))
         }
       }
       const live = printer.getSnapshot()
@@ -115,6 +128,7 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
         task: doc.task,
         taskAuto: doc.taskAuto,
         packetInterval: interval.trim() === '' ? null : Number(interval),
+        ink: mono ? 'black' : ink,
       })
       toast(t('printDone'))
     } catch (error) {
@@ -159,11 +173,29 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
               <Info k={t('model')} v={link.model ? modelLabel(link.model) : '—'} />
               <Info k={t('battery')} v={link.battery === null ? t('paperUnknown') : `${link.battery}%`} />
               <Info k={t('paper')} v={link.paper === null ? t('paperUnknown') : link.paper ? t('paperIn') : t('paperOut')} />
+              <Info k={t('lid')} v={link.lid === null ? t('paperUnknown') : link.lid ? t('lidClosed') : t('lidOpen')} />
+              <Info k={t('rfid')} v={left === null ? t('paperUnknown') : t('labelsLeft', { left, total: link.rfid.total ?? '—' })} />
+              <Info k={t('ribbon')} v={ribbonText(link.ribbon, link.ribbonRfid, t)} />
               <Info k={t('printTask')} v={link.detectedTask || '—'} />
-              <Info k={t('firmware')} v={link.firmware || '—'} />
-              <Info k={t('serial')} v={link.serial || '—'} />
+              <Info k={t('firmware')} v={fwSw || '—'} />
+              <Info k={t('hardware')} v={fwHw || '—'} />
             </dl>
           )}
+          <div className="mt-3 flex flex-col gap-2">
+            <Button disabled={link.printing || reading} onClick={() => void runDetectLabelBusy(t, setReading)}>
+              {reading ? '…' : t('detectLabel')}
+            </Button>
+            {suggestion && (
+              <p className="text-xs leading-5 text-[var(--muted)]">
+                {t('labelStock', {
+                  w: suggestion.widthMm,
+                  h: suggestion.heightMm,
+                  gap: suggestion.gapMm ? t('paperGap', { n: suggestion.gapMm }) : '',
+                })}
+                {left !== null ? ` · ${t('labelsLeft', { left, total: link.rfid.total ?? '—' })}` : ''}
+              </p>
+            )}
+          </div>
           {link.error && link.status !== 'connected' && <p className="mt-2 text-xs leading-5 text-[var(--danger)]">{linkErrorText(link.error, lang)}</p>}
           <div className="mt-3 flex flex-wrap gap-2">
             <Button variant="accent" disabled={!support.bluetooth || link.printing} onClick={() => void connect('bluetooth')}>
@@ -202,11 +234,23 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
           </SelectInput>
           <span className="mt-1 block text-xs text-[var(--muted)]">{t('sharpHint')}</span>
         </Field>
+        {colors.length > 1 && (
+          <Field label={t('colorMode')}>
+            <SelectInput value={pageColor === PageColorType.SingleColor ? 'black' : ink} onChange={(event) => setInk(event.target.value as InkMode)}>
+              {colors.map((mode) => (
+                <option key={mode} value={mode}>
+                  {mode === 'black' ? t('colorBlack') : mode === 'gray' ? t('colorGray') : t('colorRed')}
+                </option>
+              ))}
+            </SelectInput>
+            <span className="mt-1 block text-xs leading-5 text-[var(--muted)]">{t('colorHint')}</span>
+          </Field>
+        )}
         <Field label={t('density')}>
           <Slider
             label={t('density')}
-            min={meta?.densityMin ?? 1}
-            max={meta?.densityMax ?? 5}
+            min={densityMin}
+            max={densityMax}
             value={state.density}
             onGestureStart={() => engine.beginGesture()}
             onGestureEnd={() => engine.endGesture()}
@@ -241,7 +285,7 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
           )}
           <Field label={t('labelType')}>
             <SelectInput value={state.labelType} onChange={(event) => engine.setLabelType(Number(event.target.value))}>
-              {LABEL_TYPES.map((item) => (
+              {labelOptions.map((item) => (
                 <option key={item.id} value={item.id}>
                   {t(item.key as I18nKey)}
                 </option>
@@ -304,10 +348,13 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
             dpi: state.dpi,
             w: pageW,
             h: pageH,
-            head: link.printhead ?? '—',
+            head: link.printhead ?? meta?.printheadPixels ?? '—',
           })}
           {link.dpi && link.dpi !== state.dpi ? ` · ${t('dpi')} ${link.dpi}` : ''}
         </p>
+        {link.printhead && link.printheadSensor && link.printheadSensor !== link.printhead && (
+          <p className="text-xs leading-5 text-[var(--muted)]">{t('headNote', { proto: link.printhead, sensor: link.printheadSensor })}</p>
+        )}
         <button type="button" className="text-left text-sm font-bold text-[var(--accent)]" onClick={() => setDiag((open) => !open)}>
           {t('diagnostics')}
         </button>
@@ -334,19 +381,23 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
             </button>
             {fwOpen && (
               <div className="flex flex-col gap-2 rounded-2xl border-2 border-[var(--danger)] p-3">
-                <p className="text-sm font-bold leading-5 text-[var(--danger)]">{t('flashLead')}</p>
-                <p className="text-xs leading-5 text-[var(--text)]">{t('flashWarn')}</p>
+                <p className="text-sm font-bold leading-5 text-[var(--danger)]">{t('flashLead', { model: modelLabel(fwModel) })}</p>
+                <p className="text-xs leading-5 text-[var(--text)]">{t('flashWarn', { hw: fwHw || '—', sw: fwSw || '—' })}</p>
                 <p className="text-xs leading-5">
-                  {t('firmware')}: {link.firmware || '—'} · {t('hardware')}: {link.hardware || '—'}
+                  {t('firmware')}: {fwSw || '—'} · {t('hardware')}: {fwHw || '—'}
                 </p>
                 <p className="text-xs leading-5">
-                  <a className="font-bold text-[var(--accent)] underline" href="https://fw.niim.blue/stable/D11_H/" target="_blank" rel="noreferrer">
-                    {t('flashLink')}
+                  <a className="font-bold text-[var(--accent)] underline" href={firmwareArchive(fwModel)} target="_blank" rel="noreferrer">
+                    {t('flashLink', { model: modelLabel(fwModel) })}
                   </a>
-                  {' · '}
-                  <a className="font-bold text-[var(--accent)] underline" href="https://fw.niim.blue/testing/D11_H/D11_H_4.28.bin" target="_blank" rel="noreferrer">
-                    {t('flashLinkTest')}
-                  </a>
+                  {fwModel === 'D11_H' && (
+                    <>
+                      {' · '}
+                      <a className="font-bold text-[var(--accent)] underline" href="https://fw.niim.blue/testing/D11_H/D11_H_4.28.bin" target="_blank" rel="noreferrer">
+                        {t('flashLinkTest')}
+                      </a>
+                    </>
+                  )}
                 </p>
                 <label className="text-xs font-bold text-[var(--muted)]">
                   {t('flashFile')}
@@ -384,18 +435,40 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
                   className="!bg-[var(--danger)] !text-white"
                   disabled={link.status !== 'connected' || link.printing || fwProgress !== ''}
                   onClick={() => {
-                    if (!fwData) {
-                      toast(t('flashNeedFile'))
-                      return
-                    }
-                    if (!/^\d+\.\d+$/.test(fwVersion.trim())) {
-                      toast(t('flashBadVersion'))
-                      return
-                    }
-                    if (!window.confirm(t('flashConfirm'))) return
-                    setFwProgress('…')
-                    void printer
-                      .flashFirmware(fwData, fwVersion.trim(), (current, total) => setFwProgress(`${current}/${total}`))
+                  if (!fwData) {
+                    toast(t('flashNeedFile'))
+                    return
+                  }
+                  const version = fwVersion.trim()
+                  const verdict = checkFirmware({
+                    model: fwModel,
+                    hardware: link.hardware,
+                    software: link.firmware,
+                    fileName: fwName,
+                    version,
+                  })
+                  if (!verdict.ok) {
+                    toast(
+                      verdict.code === 'version'
+                        ? t('flashBadVersion')
+                        : verdict.code === 'model'
+                          ? t('flashModel', { model: modelLabel(fwModel) })
+                          : verdict.code === 'major'
+                            ? t('flashMajor', { hw: fwHw || '—', sw: fwSw || '—' })
+                            : t('flashOlder', { ver: version, sw: fwSw || '—' }),
+                    )
+                    return
+                  }
+                  if (
+                    !window.confirm(
+                      t('flashConfirm', { model: modelLabel(fwModel), sw: fwSw || '—', ver: version }),
+                    )
+                  ) {
+                    return
+                  }
+                  setFwProgress('…')
+                  void printer
+                    .flashFirmware(fwData, version, fwName, (current, total) => setFwProgress(`${current}/${total}`))
                       .then(() => {
                         setFwProgress('')
                         setFwData(null)
@@ -404,8 +477,20 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
                       })
                       .catch((error: unknown) => {
                         setFwProgress('')
-                        const message = error instanceof Error ? error.message : String(error)
-                        toast(message === 'notConnected' ? t('notConnected') : message === 'badVersion' ? t('flashBadVersion') : message)
+                      const message = error instanceof Error ? error.message : String(error)
+                      toast(
+                        message === 'notConnected'
+                          ? t('notConnected')
+                          : message === 'badVersion'
+                            ? t('flashBadVersion')
+                            : message === 'model'
+                              ? t('flashModel', { model: modelLabel(fwModel) })
+                              : message === 'major'
+                                ? t('flashMajor', { hw: fwHw || '—', sw: fwSw || '—' })
+                                : message === 'downgrade'
+                                  ? t('flashOlder', { ver: fwVersion.trim(), sw: fwSw || '—' })
+                                  : message,
+                      )
                       })
                   }}
                 >
@@ -425,6 +510,10 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
                   `dpi ${state.dpi}`,
                   `page ${pageW}x${pageH}`,
                   `head ${link.printhead ?? '-'}`,
+                  `sensor ${link.printheadSensor ?? '-'}`,
+                  `lid ${link.lid === null ? '-' : link.lid ? 'closed' : 'open'}`,
+                  `ribbon ${link.ribbon === null ? '-' : link.ribbon ? 'in' : 'out'} rfid ${link.ribbonRfid === null ? '-' : link.ribbonRfid}`,
+                  `left ${labelsRemaining(link.rfid.total, link.rfid.used) ?? '-'}`,
                   `rfid ${rfidLabel(link.rfid, t)}`,
                   link.lastPrint,
                   link.packetLog,
@@ -444,6 +533,12 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
       </div>
     </Modal>
   )
+}
+
+function ribbonText(ribbon: boolean | null, rfid: boolean | null, t: (key: I18nKey, vars?: Record<string, string | number>) => string) {
+  if (ribbon === null) return t('paperUnknown')
+  if (!ribbon) return t('ribbonOut')
+  return rfid ? t('ribbonOk') : t('ribbonSeen')
 }
 
 function rfidLabel(rfid: { present: boolean | null; used: number | null; total: number | null; kind: number | null; barcode: string; readOk: boolean | null; widthMm: number | null; heightMm: number | null }, t: (key: I18nKey, vars?: Record<string, string | number>) => string) {

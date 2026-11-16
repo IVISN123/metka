@@ -19,7 +19,9 @@ import { LabelCodeError } from '../lib/codes'
 import { importErrorKey, noteStorageError, storageErrorCode } from '../lib/errors'
 import { renderDocumentColor, renderDocumentThermal, thumbnailOf } from '../lib/render'
 import { autosaveSignature, listTemplates, saveDesign, saveTemplate, writeAutosave } from '../lib/storage'
-import { MODEL_IDS, PRESETS, matchingPreset, metaFor } from '../lib/presets'
+import { MODEL_IDS, directionOf, matchingPreset, metaFor, presetSections } from '../lib/presets'
+import { labelsRemaining, suggestionFromRfid } from '../lib/printer-profile'
+import { runDetectLabelBusy, syncEditorWithPrinter } from '../lib/apply-printer'
 import { printer } from '../printer/controller'
 import { downloadText, downloadUrl, mmToPx, modelLabel, parseMm, sizeClampNote, slug, uid, uniqueName } from '../lib/units'
 import { toast } from '../toast'
@@ -41,6 +43,8 @@ export function Shell() {
   const { state } = useEngine()
   const link = useSyncExternalStore(printer.subscribe, printer.getSnapshot, printer.getSnapshot)
   const sizeDpi = link.status === 'connected' && link.dpi ? link.dpi : state.dpi
+  const roll = link.status === 'connected' ? suggestionFromRfid(link.rfid) : null
+  const leftLabels = labelsRemaining(link.rfid.total, link.rfid.used)
   const [sheet, setSheet] = useState<null | 'tools' | 'layers' | 'props'>(null)
   const [menu, setMenu] = useState<null | 'size' | 'file' | 'theme'>(null)
   const [gallery, setGallery] = useState<null | { tab: 'templates' | 'designs'; compose: boolean }>(null)
@@ -48,6 +52,7 @@ export function Shell() {
   const [batchOpen, setBatchOpen] = useState(false)
   const [batch, setBatch] = useState<BatchJob>(null)
   const [help, setHelp] = useState(false)
+  const [reading, setReading] = useState(false)
   const [newOpen, setNewOpen] = useState(false)
   const [bannerOff, setBannerOff] = useState(() => {
     try {
@@ -101,6 +106,33 @@ export function Shell() {
     }, 800)
     return () => window.clearTimeout(timer)
   }, [autosaveKey, state.designId, state.dirty, state.ready, t])
+
+  const appliedPrinter = useRef('')
+  useEffect(() => {
+    if (link.status !== 'connected') {
+      appliedPrinter.current = ''
+      return
+    }
+    if (!state.ready || !link.model) return
+    const key = [
+      link.transport ?? '',
+      link.model,
+      link.dpi ?? '',
+      link.detectedTask,
+      link.protocol ?? '',
+      link.labelTypes.join('.'),
+      link.densityMin ?? '',
+      link.densityMax ?? '',
+    ].join(':')
+    if (appliedPrinter.current === key) return
+    appliedPrinter.current = key
+    syncEditorWithPrinter(link)
+  }, [link, state.ready])
+
+  useEffect(() => {
+    if (!state.ready) return
+    void printer.reconnectGranted()
+  }, [state.ready])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -367,22 +399,51 @@ export function Shell() {
               <TextInput className="mt-1" value={state.name} onChange={(event) => engine.setName(event.target.value)} />
             </label>
             <p className="mb-2 text-xs leading-5 text-[var(--muted)]">{t('tapeNote')}</p>
-            <div className="grid grid-cols-2 gap-1 sm:grid-cols-3">
-              {PRESETS.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => {
-                    engine.setSize(item.widthMm, item.heightMm, sizeDpi)
-                    setMenu(null)
-                  }}
-                  className={`rounded-2xl px-2 py-2 text-left hover:bg-[var(--hover)] ${preset?.id === item.id ? 'bg-[var(--hover)]' : ''}`}
-                >
-                  <div className="text-sm font-bold">{item.title}</div>
-                  <div className="text-[11px] text-[var(--muted)]">{item.note[lang]}</div>
-                </button>
-              ))}
-            </div>
+            <Button className="mb-2" disabled={reading || link.printing} onClick={() => void runDetectLabelBusy(t, setReading)}>
+              {reading ? '…' : t('detectLabel')}
+            </Button>
+            {roll && (
+              <p className="mb-2 text-xs leading-5 text-[var(--muted)]">
+                {t('labelStock', {
+                  w: roll.widthMm,
+                  h: roll.heightMm,
+                  gap: roll.gapMm ? t('paperGap', { n: roll.gapMm }) : '',
+                })}
+                {leftLabels !== null ? ` · ${t('labelsLeft', { left: leftLabels, total: link.rfid.total ?? '—' })}` : ''}
+              </p>
+            )}
+            {presetSections(state.model).map((section) => {
+              const head = metaFor(state.model)
+              return (
+                <div key={section.id}>
+                  {state.model === 'B21_PRO' && (
+                    <p className={`mb-1 text-xs font-bold ${section.id === 'rest' ? 'mt-3' : ''}`}>
+                      {section.id === 'b21' ? t('b21Presets') : t('otherPresets')}
+                    </p>
+                  )}
+                  <div className="grid grid-cols-2 gap-1 sm:grid-cols-3">
+                    {section.items.map((item) => {
+                      const axis = directionOf(state.model) === 'top' ? item.widthMm : item.heightMm
+                      const wide = !!head && mmToPx(axis, head.dpi) > head.printheadPixels
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => {
+                            engine.setSize(item.widthMm, item.heightMm, sizeDpi)
+                            setMenu(null)
+                          }}
+                          className={`rounded-2xl px-2 py-2 text-left hover:bg-[var(--hover)] ${preset?.id === item.id ? 'bg-[var(--hover)]' : ''}`}
+                        >
+                          <div className="text-sm font-bold">{item.title}</div>
+                          <div className="text-[11px] text-[var(--muted)]">{wide ? t('widerHead') : item.note[lang]}</div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
             <div className="mt-3 grid grid-cols-2 gap-2">
               <label className="text-xs text-[var(--muted)]">
                 {t('width')}

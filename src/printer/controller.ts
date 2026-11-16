@@ -1,17 +1,28 @@
 import {
   ImageEncoder,
   LabelType,
-  PageColorType,
-  instantiateClient,
+  NiimbotBluetoothClient,
+  NiimbotSerialClient,
   type NiimbotAbstractClient,
   type PrintTaskName,
 } from '@mmote/niimbluelib'
 import type { AlignMode, PrintDirection, PrinterSnapshot, RfidView } from '../types'
 import { emptyRfid } from '../types'
-import { browserSupport, connectBlock, connectFailureCode } from '../lib/browser'
+import {
+  browserSupport,
+  connectBlock,
+  connectFailureCode,
+  listGrantedBluetooth,
+  listGrantedSerial,
+  pickGrantedBluetooth,
+  rememberTransport,
+  rememberedTransport,
+  reconnectTransports,
+} from '../lib/browser'
 import { formatPacketLine, rfidFromClient } from '../lib/diag'
 import { describeEncoded, padCanvas } from '../lib/encode'
 import { resolvePrintTask } from '../lib/presets'
+import { checkFirmware, padWidth, pageColorFor, type InkMode } from '../lib/printer-profile'
 
 export type PrintJob = {
   pages: HTMLCanvasElement[]
@@ -24,6 +35,8 @@ export type PrintJob = {
   task: string
   taskAuto: boolean
   packetInterval: number | null
+  /** Omitted or `black` stays on the 1-bit encoder. Gray and red are opt-in. */
+  ink?: InkMode
 }
 
 const initial = (): PrinterSnapshot => ({
@@ -31,11 +44,22 @@ const initial = (): PrinterSnapshot => ({
   transport: null,
   deviceName: '',
   model: '',
+  modelId: null,
   detectedTask: '',
   dpi: null,
   printhead: null,
+  printheadSensor: null,
   battery: null,
   paper: null,
+  lid: null,
+  temp: null,
+  ribbon: null,
+  ribbonRfid: null,
+  labelTypes: [],
+  densityMin: null,
+  densityMax: null,
+  supportColor: null,
+  printColors: [],
   firmware: '',
   hardware: '',
   protocol: null,
@@ -76,12 +100,29 @@ export class PrinterController {
   private identity(client: NiimbotAbstractClient) {
     const info = client.getPrinterInfo()
     const meta = client.getModelMetadata()
+    const beat = client.getHeartbeatData()
+    const reportedDpi = info.capabilities?.printheadDpi
+    const dpi = reportedDpi === 300 || reportedDpi === 203 ? reportedDpi : (meta?.dpi ?? this.snapshot.dpi)
+    const density = info.capabilities?.densityRange
     return {
       model: meta?.model ?? (info.modelId ? `#${info.modelId}` : this.snapshot.model),
+      modelId: info.modelId ?? this.snapshot.modelId,
       detectedTask: client.getPrintTaskType() ?? this.snapshot.detectedTask,
-      dpi: meta?.dpi ?? this.snapshot.dpi,
+      dpi,
+      // Protocol dots (591 on B21 Pro), not the narrower sensor reading (576).
       printhead: meta?.printheadPixels ?? this.snapshot.printhead,
-      battery: info.batteryPercents ?? client.getHeartbeatData().batteryPercents ?? this.snapshot.battery,
+      printheadSensor: info.printheadWidth ?? info.capabilities?.printheadWidth ?? this.snapshot.printheadSensor,
+      battery: info.batteryPercents ?? beat.batteryPercents ?? this.snapshot.battery,
+      paper: beat.paperInserted ?? this.snapshot.paper,
+      lid: beat.lidClosed ?? this.snapshot.lid,
+      temp: beat.temp ?? this.snapshot.temp,
+      ribbon: beat.ribbonInserted ?? this.snapshot.ribbon,
+      ribbonRfid: beat.ribbonRfidSuccess ?? this.snapshot.ribbonRfid,
+      labelTypes: info.capabilities?.supportedLabelTypes ?? meta?.paperTypes ?? this.snapshot.labelTypes,
+      densityMin: density?.min ?? meta?.densityMin ?? this.snapshot.densityMin,
+      densityMax: density?.max ?? meta?.densityMax ?? this.snapshot.densityMax,
+      supportColor: info.supportColor ?? this.snapshot.supportColor,
+      printColors: info.capabilities?.printColor ?? this.snapshot.printColors,
       firmware: info.softwareVersion ?? this.snapshot.firmware,
       hardware: info.hardwareVersion ?? this.snapshot.hardware,
       protocol: info.protocolVersion ?? this.snapshot.protocol,
@@ -102,18 +143,38 @@ export class PrinterController {
     for (const listener of this.listeners) listener()
   }
 
-  async connect(transport: 'bluetooth' | 'serial') {
+  async connect(
+    transport: 'bluetooth' | 'serial',
+    options?: { quiet?: boolean; bluetoothDevice?: { name?: string }; serialPort?: object },
+  ) {
     await this.disconnect()
     const blocked = connectBlock(transport, browserSupport())
     if (blocked) {
-      this.patch({ status: 'error', transport: null, error: blocked })
+      if (!options?.quiet) this.patch({ status: 'error', transport: null, error: blocked })
       throw new Error(blocked)
     }
     let client: NiimbotAbstractClient
+    const open = () => {
+      if (transport === 'bluetooth') {
+        const ble = new NiimbotBluetoothClient()
+        return {
+          client: ble,
+          start: () => ble.connect(options?.bluetoothDevice ? { authorizedDevice: options.bluetoothDevice as never } : undefined),
+        }
+      }
+      const serial = new NiimbotSerialClient()
+        return {
+          client: serial,
+          start: () => serial.connect(options?.serialPort ? { authorizedPort: options.serialPort as never } : undefined),
+        }
+    }
+    let start: () => Promise<unknown>
     try {
-      client = instantiateClient(transport)
+      const opened = open()
+      client = opened.client
+      start = opened.start
     } catch (error) {
-      this.patch({ status: 'error', transport: null, error: connectFailureCode(error, transport) })
+      if (!options?.quiet) this.patch({ status: 'error', transport: null, error: connectFailureCode(error, transport) })
       throw error
     }
     this.client = client
@@ -146,6 +207,10 @@ export class PrinterController {
       this.patch({
         battery: event.data.batteryPercents ?? this.snapshot.battery,
         paper: event.data.paperInserted ?? this.snapshot.paper,
+        lid: event.data.lidClosed ?? this.snapshot.lid,
+        temp: event.data.temp ?? this.snapshot.temp,
+        ribbon: event.data.ribbonInserted ?? this.snapshot.ribbon,
+        ribbonRfid: event.data.ribbonRfidSuccess ?? this.snapshot.ribbonRfid,
         rfid: { ...this.snapshot.rfid, readOk: event.data.paperRfidSuccess ?? this.snapshot.rfid.readOk },
       })
     })
@@ -162,7 +227,8 @@ export class PrinterController {
       this.patch({ progress: event.progress, progressLabel: '…' })
     })
     try {
-      await client.connect()
+      await start()
+      rememberTransport(transport)
       if (!client.getModelMetadata()) {
         try {
           await client.fetchPrinterInfo()
@@ -176,13 +242,63 @@ export class PrinterController {
       this.client = null
       client.removeAllListeners()
       void client.disconnect().catch(() => undefined)
-      this.patch({
-        status: 'error',
-        transport: null,
-        error: connectFailureCode(error, transport),
-      })
+      if (options?.quiet) this.patch(this.parked())
+      else {
+        this.patch({
+          status: 'error',
+          transport: null,
+          error: connectFailureCode(error, transport),
+        })
+      }
       throw error
     }
+  }
+
+  /**
+   * Reconnect a printer this origin was already allowed to use.
+   * `getDevices` / `getPorts` are missing in some browsers; that is a no-op, not an error.
+   */
+  async reconnectGranted(): Promise<boolean> {
+    if (this.snapshot.status === 'connected' || this.snapshot.status === 'connecting' || this.snapshot.printing) return false
+    const support = browserSupport()
+    if (!support.secure) return false
+    const bluetooth = support.bluetooth ? await listGrantedBluetooth() : []
+    const serial = support.serial ? await listGrantedSerial() : []
+    const order = reconnectTransports({
+      bluetooth: bluetooth.length,
+      serial: serial.length,
+      last: rememberedTransport(),
+    })
+    for (const transport of order) {
+      try {
+        if (transport === 'bluetooth') {
+          const device = pickGrantedBluetooth(bluetooth)
+          if (!device) continue
+          await this.connect('bluetooth', { quiet: true, bluetoothDevice: device })
+        } else {
+          const port = serial[0]
+          if (!port) continue
+          await this.connect('serial', { quiet: true, serialPort: port })
+        }
+        return true
+      } catch {
+        /* the radio is granted but the printer is off, or it is not a Niimbot */
+      }
+    }
+    return false
+  }
+
+  async readLabel(): Promise<RfidView> {
+    const client = this.client
+    if (!client?.isConnected()) throw new Error('notConnected')
+    try {
+      await client.fetchRfidInfo()
+    } catch {
+      /* connect() may already have stored a roll that this command refused */
+    }
+    const rfid = this.readRfid(client)
+    this.patch({ rfid })
+    return rfid
   }
 
   private parked(error = '', status: PrinterSnapshot['status'] = 'idle'): PrinterSnapshot {
@@ -192,9 +308,20 @@ export class PrinterController {
       error,
       deviceName: this.snapshot.deviceName,
       model: this.snapshot.model,
+      modelId: this.snapshot.modelId,
       detectedTask: this.snapshot.detectedTask,
       dpi: this.snapshot.dpi,
       printhead: this.snapshot.printhead,
+      printheadSensor: this.snapshot.printheadSensor,
+      lid: this.snapshot.lid,
+      temp: this.snapshot.temp,
+      ribbon: this.snapshot.ribbon,
+      ribbonRfid: this.snapshot.ribbonRfid,
+      labelTypes: this.snapshot.labelTypes,
+      densityMin: this.snapshot.densityMin,
+      densityMax: this.snapshot.densityMax,
+      supportColor: this.snapshot.supportColor,
+      printColors: this.snapshot.printColors,
       firmware: this.snapshot.firmware,
       hardware: this.snapshot.hardware,
       protocol: this.snapshot.protocol,
@@ -236,8 +363,14 @@ export class PrinterController {
       protocolVersion: info.protocolVersion,
     }) as PrintTaskName
     let density = Math.round(job.density)
-    if (meta) density = Math.min(meta.densityMax, Math.max(meta.densityMin, density))
-    const printhead = meta?.printheadPixels ?? job.printhead
+    const densityMin = info.capabilities?.densityRange?.min ?? meta?.densityMin
+    const densityMax = info.capabilities?.densityRange?.max ?? meta?.densityMax
+    if (densityMin != null && densityMax != null) {
+      const lo = Math.min(densityMin, densityMax)
+      const hi = Math.max(densityMin, densityMax)
+      density = Math.min(hi, Math.max(lo, density))
+    }
+    const printhead = padWidth(meta?.printheadPixels ?? job.printhead, info.printheadWidth)
     if (job.packetInterval !== null && Number.isFinite(job.packetInterval)) {
       client.setPacketInterval(Math.max(0, job.packetInterval))
     }
@@ -246,14 +379,16 @@ export class PrinterController {
     client.stopHeartbeat()
     const totalPages = job.pages.length * quantity
     this.printLogAt = this.packetLines.length
-    const plan = `# print task=${taskName} density=${density} labelType=${job.labelType} totalPages=${totalPages} printhead=${printhead ?? '-'} firmware=${info.softwareVersion ?? this.snapshot.firmware}`
+    const pageColor = pageColorFor(taskName, job.ink ?? 'black')
+    const plan = `# print task=${taskName} density=${density} labelType=${job.labelType} pageColor=${pageColor} totalPages=${totalPages} printhead=${printhead ?? '-'} sensor=${info.printheadWidth ?? '-'} firmware=${info.softwareVersion ?? this.snapshot.firmware}`
     this.note(plan)
     const task = client.protocol.newPrintTask(taskName, {
       totalPages,
       density,
+      // D110M_V4 speed is 0 or 1 (clarity / speed). 1 is the library default for every model on this task.
       speed: 1,
       labelType: job.labelType as LabelType,
-      pageColor: PageColorType.SingleColor,
+      pageColor,
       statusPollIntervalMs: 100,
       statusTimeoutMs: 8_000,
     })
@@ -273,7 +408,7 @@ export class PrinterController {
           progress: Math.round((index / job.pages.length) * 100),
         })
         const { canvas } = padCanvas(page, job.direction, printhead, job.align)
-        const encoded = ImageEncoder.encodeCanvas(canvas, PageColorType.SingleColor, job.direction)
+        const encoded = ImageEncoder.encodeCanvas(canvas, pageColor, job.direction)
         await task.printPage(encoded, quantity)
         await task.waitForPageFinished()
       }
@@ -300,10 +435,18 @@ export class PrinterController {
     if (failure) throw failure
   }
 
-  async flashFirmware(data: Uint8Array, version: string, onProgress?: (current: number, total: number) => void) {
+  async flashFirmware(data: Uint8Array, version: string, fileName: string, onProgress?: (current: number, total: number) => void) {
     const client = this.client
     if (!client?.isConnected()) throw new Error('notConnected')
-    if (!/^\d+\.\d+$/.test(version)) throw new Error('badVersion')
+    const info = client.getPrinterInfo()
+    const verdict = checkFirmware({
+      model: client.getModelMetadata()?.model ?? this.snapshot.model,
+      hardware: info.hardwareVersion ?? this.snapshot.hardware,
+      software: info.softwareVersion ?? this.snapshot.firmware,
+      fileName,
+      version,
+    })
+    if (!verdict.ok) throw new Error(verdict.code === 'version' ? 'badVersion' : verdict.code)
     client.stopHeartbeat()
     const listener = (event: { currentChunk: number; totalChunks: number }) => {
       onProgress?.(event.currentChunk, event.totalChunks)
