@@ -31,6 +31,35 @@ In the GitHub repo, set **Settings → Pages → Build and deployment → Source
 
 `npm run build` also writes `dist/` for any other static host. That build is rooted at `/metka/`. A host that serves the files at the domain root needs `base` changed first. The host must use **HTTPS**. Web Bluetooth and Web Serial are disabled on plain `http://` except for `localhost`. Opening `dist/index.html` as a `file://` URL will not work.
 
+## PIN gate
+
+The public site can ask for a 4-digit PIN before the editor opens. This is a deterrent for casual visitors, not real protection. The page is a static bundle anyone can download: the salted SHA-256 sits in the JavaScript, and four digits can be checked offline. It does not hide the files or stop a determined person. Real protection would be something like Cloudflare Access on a custom domain.
+
+Local `npm run dev`, `npm test`, and any build where the variables are empty leave the gate off. Until both secrets below exist, the deployed site stays open.
+
+### Set the secrets
+
+The PIN is not stored in this repo. The script prints a salt and a hash, and does not write a file. It runs on Node 22, the same version as the deploy workflow:
+
+```bash
+npm run pin-hash -- 1234
+```
+
+In the GitHub repo, open **Settings → Secrets and variables → Actions → New repository secret** and create both:
+
+| Secret | Value |
+| --- | --- |
+| `VITE_METKA_PIN_SALT` | the salt the script printed (32 hex characters) |
+| `VITE_METKA_PIN_HASH` | the hash the script printed (64 hex characters) |
+
+`.github/workflows/deploy.yml` passes those into `npm run build`. Redeploy by pushing to `main`, or with **Actions → Deploy GitHub Pages → Run workflow**. Copy both values exactly. A mistyped hash locks the site until you replace the secrets and redeploy. An empty or missing secret leaves it open.
+
+To try the gate on your machine, put the same two lines in `.env.local` (gitignored) and restart `npm run dev`.
+
+### Change the PIN
+
+Run `npm run pin-hash` again with the new four digits, replace both secrets, and redeploy. Browsers that already unlocked store the previous hash in `localStorage`, so a new hash asks for the PIN again. **Файл → Заблокировать** locks this device without changing the PIN. The unlock is remembered only on that device.
+
 ## Templates and designs
 
 Everything is stored in this browser:
@@ -78,4 +107,5 @@ Heartbeat polling is paused while those packets are sent, then resumed. If the c
 | `npm run dev` | Dev server on port 43123 |
 | `npm run build` | Typecheck and static build |
 | `npm run preview` | Serve `dist/` |
-| `npm test` | Unit tests (geometry, CSV, dither, template files, encoder) |
+| `npm test` | Unit tests (geometry, CSV, dither, template files, encoder, PIN hash) |
+| `npm run pin-hash -- 1234` | Print a salt and SHA-256 for the PIN-gate secrets |

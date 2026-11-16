@@ -1,10 +1,13 @@
-import { AppState } from './components/state'
+import { PinGate } from './components/PinGate'
 import { Shell } from './components/Shell'
+import { AppState } from './components/state'
 
 export default function App() {
   return (
     <AppState>
-      <Shell />
+      <PinGate>
+        <Shell />
+      </PinGate>
     </AppState>
   )
 }

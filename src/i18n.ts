@@ -342,6 +342,12 @@ const ru = {
     'Safari на iPhone и iPad не печатает, а эта страница ещё и открыта не по HTTPS. Откройте Метку в Chrome на компьютере или Android по защищённому адресу.',
   photoTooBig: 'Фото больше 12 МБ. Уменьшите его перед добавлением.',
   photoFail: 'Это фото не открылось.',
+  pinTitle: 'Введите PIN',
+  pinLabel: 'PIN-код',
+  pinHint: 'Четыре цифры. На этом устройстве код запоминается.',
+  pinWrong: 'Неверный PIN',
+  pinWait: 'Слишком много попыток. Подождите немного.',
+  pinLock: 'Заблокировать',
 } as const
 
 const en: { [K in keyof typeof ru]: string } = {
@@ -686,6 +692,12 @@ const en: { [K in keyof typeof ru]: string } = {
     'Safari on iPhone and iPad cannot print, and this page is not HTTPS. Open Metka in Chrome on a computer or Android over a secure address.',
   photoTooBig: 'That photo is larger than 12 MB. Shrink it before adding it.',
   photoFail: 'That photo could not be opened.',
+  pinTitle: 'Enter the PIN',
+  pinLabel: 'PIN',
+  pinHint: 'Four digits. This device remembers the code.',
+  pinWrong: 'Wrong PIN',
+  pinWait: 'Too many attempts. Wait a moment.',
+  pinLock: 'Lock',
 }
 
 export type I18nKey = keyof typeof ru
