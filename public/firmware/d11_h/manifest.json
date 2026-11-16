@@ -1,0 +1,91 @@
+{
+  "source": "https://github.com/IVISN123/d11h-patched-firmware",
+  "deviceModel": 528,
+  "hardware": "4.01",
+  "firmwares": [
+    {
+      "model": "D11_H",
+      "version": "4.28",
+      "url": "firmware/d11_h/patched/D11_H_4.28_rfid-bypass.bin",
+      "name": "D11_H_4.28_rfid-bypass.bin",
+      "sha256": "da2e805b4f89b31638b2d2d81562c6ceddfdc11197c71f1469957fa10d8fae19",
+      "size": 147952,
+      "stable": false,
+      "kind": "patched",
+      "recommend": false,
+      "notes": "Патч A+D: печать не останавливается с ошибкой 20, если RFID рулона не читается. Своя сборка, только для своего принтера. Можно убить принтер без восстановления. D11_H не принимает понижение версии."
+    },
+    {
+      "model": "D11_H",
+      "version": "4.28",
+      "url": "firmware/d11_h/patched/D11_H_4.28_rfid-bypass-density.bin",
+      "name": "D11_H_4.28_rfid-bypass-density.bin",
+      "sha256": "8da21d356be33ac7be778d25a7828f5d8a77c4daa912ff279181f0959521f1d4",
+      "size": 147952,
+      "stable": false,
+      "kind": "patched",
+      "recommend": false,
+      "notes": "Патч A+D+E: то же, плюс фиксированное число слотов нагрева без метки, чтобы печать без RFID не выходила почти пустой. Своя сборка, только для своего принтера. Можно убить принтер без восстановления. D11_H не принимает понижение версии."
+    },
+    {
+      "model": "D11_H",
+      "version": "4.28",
+      "url": "firmware/d11_h/patched/D11_H_4.28_rfid-bypass-density-history-reset.bin",
+      "name": "D11_H_4.28_rfid-bypass-density-history-reset.bin",
+      "sha256": "765ab690c34bad255e7138dd493c70dff278503e96427c393f83ff898015c4ad",
+      "size": 147972,
+      "stable": false,
+      "kind": "patched",
+      "recommend": false,
+      "notes": "Патч A+D+E+F: то же, и сброс к заводским (команда 0x28) очищает запомненную историю рулона. Своя сборка, только для своего принтера. Можно убить принтер без восстановления. D11_H не принимает понижение версии."
+    },
+    {
+      "model": "D11_H",
+      "version": "4.28",
+      "url": "firmware/d11_h/patched/D11_H_4.28_rfid-bypass-density-history-reset-used-ignore.bin",
+      "name": "D11_H_4.28_rfid-bypass-density-history-reset-used-ignore.bin",
+      "sha256": "11850eebd07d5e17730019faaebc11c7cd8e7731652ba78535d4aeb4a732dc61",
+      "size": 147972,
+      "stable": false,
+      "kind": "patched",
+      "recommend": true,
+      "notes": "Патч A+D+E+F+G, рекомендуемый набор: рулон, у которого usedPaper больше allPaper, больше не считается недействительным. Счётчик на NFC-метке не переписывается. Своя сборка, только для своего принтера. Можно убить принтер без восстановления. D11_H не принимает понижение версии."
+    },
+    {
+      "model": "D11_H",
+      "version": "4.28",
+      "url": "firmware/d11_h/original/D11_H_4.28_original.bin",
+      "name": "D11_H_4.28_original.bin",
+      "sha256": "2b0ec265797f5b24bb67babc86daf3dec1d1ea5a1a95c49cef7861c45a6bcf03",
+      "size": 147952,
+      "stable": false,
+      "kind": "original",
+      "recommend": false,
+      "notes": "Исходный образ 4.28, от которого собраны патчи. Им можно вернуться на ту же версию. Это не восстановление, если принтер уже не включается."
+    },
+    {
+      "model": "D11_H",
+      "version": "4.27",
+      "url": "firmware/d11_h/stock/D11_H_4.27_stable.bin",
+      "name": "D11_H_4.27_stable.bin",
+      "sha256": "2d40e58040894f519cdaa50ffb049ab054207c4bf93ad4bb16d7b948a031eede",
+      "size": 147968,
+      "stable": true,
+      "kind": "stock",
+      "recommend": false,
+      "notes": "Заводская стабильная 4.27, для сравнения. Если на принтере уже 4.28, D11_H не примет понижение."
+    },
+    {
+      "model": "D11_H",
+      "version": "4.28",
+      "url": "firmware/d11_h/stock/t_D11_H_4.28.bin",
+      "name": "t_D11_H_4.28.bin",
+      "sha256": "2b0ec265797f5b24bb67babc86daf3dec1d1ea5a1a95c49cef7861c45a6bcf03",
+      "size": 147952,
+      "stable": false,
+      "kind": "stock",
+      "recommend": false,
+      "notes": "Заводской тестовый 4.28. Тот же файл, что исходный образ. Для сравнения, не для лечения «кирпича»."
+    }
+  ]
+}
