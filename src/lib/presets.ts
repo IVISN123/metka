@@ -149,6 +149,22 @@ export function presetGroup(id: string): 'tape' | 'card' {
   return TAPE_IDS.has(id) ? 'tape' : 'card'
 }
 
+/** Pick an editor model whose printhead can hold this label. Keeps `current` when it already fits. */
+export function modelForLabel(current: string, widthMm: number, heightMm: number): string {
+  const order = [current, 'B21_PRO', 'B21', 'B1', 'D110', 'D11']
+  const seen = new Set<string>()
+  for (const id of order) {
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    const meta = metaFor(id)
+    if (!meta) continue
+    const axisMm = meta.printDirection === 'left' ? heightMm : widthMm
+    const axisPx = Math.round((axisMm * meta.dpi) / 25.4)
+    if (axisPx <= meta.printheadPixels) return id
+  }
+  return current
+}
+
 export function presetSearchText(preset: Preset): string {
   return [preset.title, preset.note.ru, preset.note.en, `${preset.widthMm}×${preset.heightMm}`, `${preset.heightMm}×${preset.widthMm}`, `${preset.widthMm}x${preset.heightMm}`]
     .join(' ')

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Grid3x3 } from 'lucide-react'
 import { engine } from '../engine/editor'
 import { GRID_STEPS } from '../lib/editor-ui'
@@ -10,13 +10,29 @@ export function GridMenu() {
   const { t } = useI18n()
   const { state } = useEngine()
   const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    const onDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('pointerdown', onDown)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('pointerdown', onDown)
+    }
+  }, [open])
   return (
-    <div className="relative">
-      <IconButton label={t('grid')} aria-pressed={state.gridOn} onClick={() => setOpen((value) => !value)}>
+    <div className="relative" ref={rootRef}>
+      <IconButton tip="above" label={t('grid')} aria-pressed={state.gridOn} aria-expanded={open} aria-haspopup="true" onClick={() => setOpen((value) => !value)}>
         <Grid3x3 size={18} />
       </IconButton>
       {open && (
-        <div className="absolute bottom-12 left-0 z-30 w-56 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-lg">
+        <div role="group" aria-label={t('grid')} className="absolute bottom-12 left-0 z-30 w-56 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-lg">
           <p className="mb-2 text-xs leading-5 text-[var(--muted)]">{t('gridHint')}</p>
           <label className="flex min-h-11 items-center gap-3 text-sm font-bold">
             <input type="checkbox" checked={state.gridOn} onChange={(event) => engine.setGrid({ gridOn: event.target.checked })} />

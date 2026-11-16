@@ -28,8 +28,8 @@
   --muted: #b8c1c8;
   --icon: #ffffff;
   --field: #000000;
-  --accent: #1d9bf0;
-  --accent-hover: #1a8cd8;
+  --accent: #1a73c7;
+  --accent-hover: #145ea3;
   --danger: #ff5a66;
   --pill: #f7f9f9;
   --pill-text: #0f1419;
@@ -47,8 +47,8 @@
   --muted: #c5d0da;
   --icon: #ffffff;
   --field: #15202b;
-  --accent: #1d9bf0;
-  --accent-hover: #8ecdf8;
+  --accent: #1a73c7;
+  --accent-hover: #145ea3;
   --danger: #ff5a66;
   --pill: #f7f9f9;
   --pill-text: #15202b;
@@ -61,7 +61,7 @@
   --elev: #eef3f6;
   --hover: rgba(15, 20, 25, 0.08);
   --press: rgba(15, 20, 25, 0.14);
-  --border: #8b9bab;
+  --border: #73869a;
   --text: #0f1419;
   --muted: #3d4f5f;
   --icon: #0f1419;

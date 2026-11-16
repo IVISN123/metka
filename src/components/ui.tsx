@@ -1,4 +1,6 @@
-import { useEffect, useState, useSyncExternalStore, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react'
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react'
+import { X } from 'lucide-react'
+import { focusableIn, menuMove, nextFocusIndex } from '../lib/a11y'
 import { classSetsDisplay } from '../lib/editor-ui'
 import { getToasts, subscribeToasts } from '../toast'
 
@@ -22,6 +24,7 @@ export function Button({
   return (
     <button
       {...props}
+      type={props.type ?? 'button'}
       className={cx(
         !classSetsDisplay(className) && 'inline-flex',
         'h-11 shrink-0 items-center justify-center gap-2 rounded-full px-4 text-sm font-bold transition-colors disabled:pointer-events-none disabled:opacity-40',
@@ -34,21 +37,36 @@ export function Button({
 
 export function IconButton({
   label,
+  shortcut,
+  keys,
+  tip = 'below',
   className,
   children,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string; shortcut?: string; keys?: string; tip?: 'below' | 'above' }) {
+  const title = shortcut ? `${label} (${shortcut})` : label
   return (
     <button
       {...props}
+      type={props.type ?? 'button'}
       aria-label={label}
-      title={label}
+      title={title}
+      aria-keyshortcuts={keys}
       className={cx(
-        'grid h-11 w-11 shrink-0 place-items-center rounded-full text-[var(--text)] transition-colors hover:bg-[var(--hover)] disabled:opacity-30',
+        'group relative grid h-11 w-11 shrink-0 place-items-center rounded-full text-[var(--text)] transition-colors hover:bg-[var(--hover)] disabled:opacity-40',
         className,
       )}
     >
       {children}
+      <span
+        aria-hidden
+        className={cx(
+          'pointer-events-none absolute left-1/2 z-[70] hidden -translate-x-1/2 rounded-lg border border-[var(--border)] bg-[var(--elev)] px-2 py-1 text-xs font-bold whitespace-nowrap text-[var(--text)] shadow-lg group-focus-visible:block group-hover:block',
+          tip === 'above' ? 'bottom-[calc(100%+6px)]' : 'top-[calc(100%+6px)]',
+        )}
+      >
+        {title}
+      </span>
     </button>
   )
 }
@@ -192,6 +210,7 @@ export function NumberField({
 
 export function ScrubField({
   label,
+  glyph,
   value,
   min,
   max,
@@ -201,6 +220,7 @@ export function ScrubField({
   onGestureEnd,
 }: {
   label: string
+  glyph?: ReactNode
   value: number
   min?: number
   max?: number
@@ -234,7 +254,7 @@ export function ScrubField({
         type="button"
         aria-label={label}
         title={label}
-        className="scrub-label h-full w-8 shrink-0 cursor-ew-resize rounded-l-[10px] text-xs font-bold text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+        className="scrub-label h-full min-w-8 shrink-0 cursor-ew-resize rounded-l-[10px] px-2 text-[11px] font-bold text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
         onPointerDown={(event) => {
           event.preventDefault()
           const pointer = event.pointerId
@@ -255,7 +275,7 @@ export function ScrubField({
           window.addEventListener('pointerup', end)
         }}
       >
-        {label}
+        {glyph ?? label}
       </button>
       <input
         aria-label={label}
@@ -309,31 +329,63 @@ export function Modal({
   children: ReactNode
   footer?: ReactNode
 }) {
+  const titleId = useId()
+  const panelRef = useRef<HTMLDivElement>(null)
+  const closeRef = useRef(onClose)
   useEffect(() => {
+    closeRef.current = onClose
+  })
+  useEffect(() => {
+    const panel = panelRef.current
+    const previously = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const auto = panel?.querySelector<HTMLElement>('[autofocus]')
+    if (auto) auto.focus()
+    else panel?.focus()
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeRef.current()
+        return
+      }
+      if (event.key !== 'Tab' || !panel) return
+      const items = focusableIn(panel)
+      if (items.length === 0) {
+        event.preventDefault()
+        panel.focus()
+        return
+      }
+      const index = items.indexOf(document.activeElement as HTMLElement)
+      const atEdge = index === -1 || (event.shiftKey ? index === 0 : index === items.length - 1)
+      if (!atEdge) return
+      event.preventDefault()
+      items[nextFocusIndex(index, items.length, event.shiftKey)]?.focus()
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      previously?.focus()
+    }
+  }, [])
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-6" onMouseDown={onClose}>
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-labelledby={titleId}
+        tabIndex={-1}
         onMouseDown={(event) => event.stopPropagation()}
         className={cx(
-          'flex max-h-[100dvh] w-full flex-col overflow-hidden border border-[var(--border)] bg-[var(--card)] shadow-2xl sm:max-h-[90dvh] sm:rounded-3xl',
+          'flex max-h-[100dvh] w-full flex-col overflow-hidden border border-[var(--border)] bg-[var(--card)] shadow-2xl outline-none sm:max-h-[90dvh] sm:rounded-3xl',
           wide ? 'sm:max-w-5xl' : 'sm:max-w-xl',
         )}
       >
         <header className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3 sm:px-5">
-          <h2 className="truncate text-lg font-black tracking-tight">{title}</h2>
+          <h2 id={titleId} className="truncate text-lg font-black tracking-tight">
+            {title}
+          </h2>
           <IconButton label={closeLabel} onClick={onClose}>
-            <span aria-hidden className="text-xl leading-none">
-              ×
-            </span>
+            <X size={18} />
           </IconButton>
         </header>
         <div className="min-h-0 flex-1 overflow-auto">{children}</div>
@@ -343,13 +395,58 @@ export function Modal({
   )
 }
 
+export function Menu({
+  label,
+  onClose,
+  className,
+  children,
+}: {
+  label: string
+  onClose: () => void
+  className?: string
+  children: ReactNode
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const closeRef = useRef(onClose)
+  useEffect(() => {
+    closeRef.current = onClose
+  })
+  useEffect(() => {
+    const root = ref.current
+    if (!root) return
+    const previously = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const items = () => [...root.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])')]
+    const timer = window.setTimeout(() => items()[0]?.focus(), 0)
+    const onKey = (event: KeyboardEvent) => {
+      const list = items()
+      const index = list.indexOf(document.activeElement as HTMLElement)
+      if (index === -1 && !root.contains(event.target as Node) && event.key !== 'Escape') return
+      const next = menuMove(event.key, index, list.length)
+      if (next === null) return
+      event.preventDefault()
+      if (next === 'close') closeRef.current()
+      else list[next]?.focus()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('keydown', onKey)
+      previously?.focus()
+    }
+  }, [])
+  return (
+    <div ref={ref} role="menu" aria-label={label} className={className}>
+      {children}
+    </div>
+  )
+}
+
 export function Toasts() {
   const items = useSyncExternalStore(subscribeToasts, getToasts, getToasts)
-  if (items.length === 0) return null
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-20 z-[60] flex flex-col items-center gap-2 px-4 sm:bottom-6">
+    <div className="pointer-events-none fixed inset-x-0 bottom-20 z-[60] flex flex-col items-center gap-2 px-4 sm:bottom-6" role="status" aria-live="polite">
       {items.map((item) => (
-        <div key={item.id} className="pointer-events-auto max-w-md rounded-full border border-[var(--border)] bg-[var(--elev)] px-4 py-2 text-sm font-medium shadow-lg">
+        <div key={item.id} className="pointer-events-auto max-w-md rounded-full border border-[var(--border)] bg-[var(--elev)] px-4 py-2 text-sm font-medium text-[var(--text)] shadow-lg">
           {item.text}
         </div>
       ))}

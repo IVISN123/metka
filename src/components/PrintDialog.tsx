@@ -162,7 +162,7 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
                 {link.deviceName || link.model || (support.bluetooth || support.serial ? t('supportedHere') : t('bluetoothMissing'))}
               </div>
             </div>
-            <span className={`h-2.5 w-2.5 rounded-full ${link.status === 'connected' ? 'bg-[#00ba7c]' : link.status === 'connecting' ? 'bg-[var(--accent)]' : 'bg-[var(--muted)]'}`} />
+            <span aria-hidden className={`h-2.5 w-2.5 rounded-full ${link.status === 'connected' ? 'bg-[#00ba7c]' : link.status === 'connecting' ? 'bg-[var(--accent)]' : 'bg-[var(--muted)]'}`} />
           </div>
           {link.status === 'connected' && (
             <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
@@ -178,9 +178,6 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
             </dl>
           )}
           <div className="mt-3 flex flex-col gap-2">
-            <Button disabled={link.printing || reading} onClick={() => void runDetectLabelBusy(t, setReading)}>
-              {reading ? '…' : t('detectLabel')}
-            </Button>
             {suggestion && (
               <p className="text-xs leading-5 text-[var(--muted)]">
                 {t('labelStock', {
@@ -208,6 +205,10 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
           </div>
           {!support.bluetooth && <p className="mt-2 text-xs text-[var(--muted)]">{t('bluetoothMissing')}</p>}
           {!support.serial && <p className="mt-1 text-xs text-[var(--muted)]">{t('serialMissing')}</p>}
+          <Button className="mt-3 w-full" disabled={link.printing || reading || link.status !== 'connected'} aria-busy={reading} onClick={() => void runDetectLabelBusy(t, setReading)}>
+            {reading ? t('detecting') : t('detectLabel')}
+          </Button>
+          {link.status !== 'connected' && <p className="text-xs leading-5 text-[var(--muted)]">{t('detectLabelNeed')}</p>}
         </div>
 
         {batch && (
@@ -351,7 +352,12 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
         {link.printhead && link.printheadSensor && link.printheadSensor !== link.printhead && (
           <p className="text-xs leading-5 text-[var(--muted)]">{t('headNote', { proto: link.printhead, sensor: link.printheadSensor })}</p>
         )}
-        <button type="button" className="text-left text-sm font-bold text-[var(--accent)]" onClick={() => setDiag((open) => !open)}>
+        <button type="button" className="min-h-11 text-left text-sm font-bold text-[var(--accent)]" aria-expanded={fwOpen} onClick={() => setFwOpen((open) => !open)}>
+          {t('firmwareOpen')}
+        </button>
+        {!fwOpen && <p className="-mt-2 text-xs leading-5 text-[var(--muted)]">{t('firmwareHint')}</p>}
+        {fwOpen && <FirmwarePanel />}
+        <button type="button" className="min-h-11 text-left text-sm font-bold text-[var(--accent)]" aria-expanded={diag} onClick={() => setDiag((open) => !open)}>
           {t('diagnostics')}
         </button>
         {diag && (
@@ -372,10 +378,6 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
               className="h-40 w-full resize-y rounded-xl border border-[var(--border)] bg-transparent p-2 font-mono text-[11px] leading-4"
               value={link.packetLog || t('noPacketLog')}
             />
-            <button type="button" className="text-left text-sm font-bold text-[var(--danger)]" onClick={() => setFwOpen((open) => !open)}>
-              {t('firmwareFlash')}
-            </button>
-            {fwOpen && <FirmwarePanel />}
             <Button
               onClick={() => {
                 const text = [

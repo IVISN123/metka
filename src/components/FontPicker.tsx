@@ -19,8 +19,15 @@ export function FontPicker({ value, onChange }: { value: string; onChange: (fami
     const onDown = (event: MouseEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
     }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
     window.addEventListener('mousedown', onDown)
-    return () => window.removeEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
   }, [open])
   const q = query.trim().toLowerCase()
   const shown = fonts.filter((font) => !q || font.label.toLowerCase().includes(q) || font.family.toLowerCase().includes(q))
@@ -37,6 +44,7 @@ export function FontPicker({ value, onChange }: { value: string; onChange: (fami
         className="flex h-11 w-full items-center justify-between gap-2 rounded-xl border-2 border-[var(--border)] bg-[var(--field)] px-3 text-left text-base font-bold text-[var(--text)]"
         style={{ fontFamily: value }}
         aria-expanded={open}
+        aria-haspopup="listbox"
         aria-label={t('font')}
         onClick={() => setOpen((next) => !next)}
       >
@@ -44,7 +52,7 @@ export function FontPicker({ value, onChange }: { value: string; onChange: (fami
         <ChevronDown size={18} className="shrink-0 text-[var(--icon)]" />
       </button>
       {open && (
-        <div className="absolute z-40 mt-1 max-h-80 w-full overflow-auto rounded-2xl border border-[var(--border)] bg-[var(--card)] p-2 shadow-lg">
+        <div role="listbox" aria-label={t('font')} className="absolute z-40 mt-1 max-h-80 w-full overflow-auto rounded-2xl border border-[var(--border)] bg-[var(--card)] p-2 shadow-lg">
           <input
             autoFocus
             aria-label={t('fontSearch')}
@@ -53,8 +61,8 @@ export function FontPicker({ value, onChange }: { value: string; onChange: (fami
             onChange={(event) => setQuery(event.target.value)}
             className="mb-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--field)] px-3 text-sm font-bold text-[var(--text)] outline-none focus:border-[var(--accent)]"
           />
-          <FontGroup title={t('bundledFonts')} fonts={file} value={value} onPick={pick} />
-          <FontGroup title={t('systemFonts')} fonts={system} value={value} onPick={pick} />
+          <FontGroup title={t('bundledFonts')} fonts={file} value={value} sample={t('appName')} onPick={pick} />
+          <FontGroup title={t('systemFonts')} fonts={system} value={value} sample={t('appName')} onPick={pick} />
           {shown.length === 0 && <p className="px-2 py-3 text-sm text-[var(--muted)]">{t('noFont')}</p>}
         </div>
       )}
@@ -66,11 +74,13 @@ function FontGroup({
   title,
   fonts,
   value,
+  sample,
   onPick,
 }: {
   title: string
   fonts: FontChoice[]
   value: string
+  sample: string
   onPick: (family: string) => void
 }) {
   if (fonts.length === 0) return null
@@ -81,12 +91,14 @@ function FontGroup({
         <button
           key={font.id}
           type="button"
+          role="option"
+          aria-selected={font.family === value}
           className={`block min-h-11 w-full rounded-xl px-3 py-2 text-left text-lg text-[var(--text)] ${font.family === value ? 'bg-[var(--hover)]' : 'hover:bg-[var(--hover)]'}`}
           style={{ fontFamily: font.family }}
           onClick={() => onPick(font.family)}
         >
           <span>{font.label}</span>
-          <span className="ml-3 text-[var(--muted)]">Метка</span>
+          <span className="ml-3 text-[var(--muted)]">{sample}</span>
         </button>
       ))}
     </div>

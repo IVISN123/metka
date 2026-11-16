@@ -179,7 +179,7 @@ export function Gallery({
         {current === 'templates' ? (
           <>
             <Section title={t('myTemplates')}>
-              {templates.length === 0 && <Empty>{t('noUserTemplates')}</Empty>}
+              {templates.length === 0 && <Empty hint={t('noUserTemplatesHint')}>{t('noUserTemplates')}</Empty>}
               {templates.length > 0 && filteredTemplates.length === 0 && <Empty>{t('noMatch')}</Empty>}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {filteredTemplates.map((item) => (
@@ -272,7 +272,7 @@ export function Gallery({
           </>
         ) : (
           <Section title={t('designs')}>
-            {designs.length === 0 && <Empty>{t('emptyDesigns')}</Empty>}
+            {designs.length === 0 && <Empty hint={t('emptyDesignsHint')}>{t('emptyDesigns')}</Empty>}
             {designs.length > 0 && filteredDesigns.length === 0 && <Empty>{t('noMatch')}</Empty>}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {filteredDesigns.map((item) => (
@@ -340,8 +340,13 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
-function Empty({ children }: { children: ReactNode }) {
-  return <p className="mb-3 text-sm text-[var(--muted)]">{children}</p>
+function Empty({ children, hint }: { children: ReactNode; hint?: string }) {
+  return (
+    <div className="mb-3 rounded-2xl border border-dashed border-[var(--border)] px-3 py-4">
+      <p className="text-sm font-medium">{children}</p>
+      {hint && <p className="mt-1 text-xs leading-5 text-[var(--muted)]">{hint}</p>}
+    </div>
+  )
 }
 
 function Card({

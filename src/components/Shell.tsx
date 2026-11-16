@@ -35,7 +35,7 @@ import { PrintDialog, type BatchJob } from './PrintDialog'
 import { Stage, useEngine } from './Stage'
 import { PinLockItem } from './PinGate'
 import { useI18n, useTheme } from './state'
-import { Button, IconButton, Modal, Slider, TextInput, Toasts } from './ui'
+import { Button, IconButton, Menu, Modal, Slider, TextInput, Toasts } from './ui'
 
 export function Shell() {
   const { t, lang, setLang } = useI18n()
@@ -87,6 +87,14 @@ export function Shell() {
     preview: state.preview,
   })
   const menuRef = useRef<HTMLDivElement>(null)
+  const importRef = useRef<HTMLInputElement>(null)
+  const [coach, setCoach] = useState(() => {
+    try {
+      return localStorage.getItem('metka.coach') !== '1'
+    } catch {
+      return true
+    }
+  })
   const mod = modKey()
   const preset = matchingPreset(state.widthMm, state.heightMm)
   const pxW = mmToPx(state.widthMm, state.dpi)
@@ -243,10 +251,17 @@ export function Shell() {
     }
   }
 
+  const bannerCopy = (kind: NonNullable<typeof block>, compact: boolean) => {
+    if (kind === 'insecure-ios') return t('insecureIos')
+    if (kind === 'insecure') return t('insecure')
+    if (kind === 'ios') return t('browserBannerIos')
+    return compact ? t('browserBannerShort') : t('browserBanner')
+  }
+
   return (
     <div className="relative flex h-dvh flex-col bg-[var(--bg)] text-[var(--text)]">
       <header ref={menuRef} className="relative z-30 h-14 shrink-0 border-b border-[var(--border)]">
-        <div className="flex h-full items-center gap-1 overflow-hidden px-2 sm:gap-2 sm:px-3">
+        <div role="toolbar" aria-label={t('appName')} className="flex h-full w-full min-w-0 items-center gap-1 overflow-x-auto px-2 sm:gap-2 sm:overflow-x-visible sm:px-3">
         <div className="mr-0.5 flex shrink-0 items-center gap-2 pl-1">
           <span className="grid h-8 w-8 place-items-center rounded-full bg-[var(--text)] text-xs font-black text-[var(--bg)]">M</span>
           <span className="hidden text-[17px] font-black tracking-tight md:inline">{t('appName')}</span>
@@ -260,15 +275,23 @@ export function Shell() {
         <button
           type="button"
           aria-expanded={menu === 'size'}
+          aria-haspopup="true"
           onClick={() => setMenu(menu === 'size' ? null : 'size')}
           className="h-11 max-w-[7.5rem] shrink-0 truncate rounded-full border border-[var(--border)] px-3 text-sm font-bold hover:bg-[var(--hover)]"
         >
           {preset?.title ?? `${state.widthMm}×${state.heightMm}`}
         </button>
-        <IconButton label={`${t('undo')} (${mod}+Z)`} aria-keyshortcuts="Control+Z" disabled={!state.canUndo} onClick={() => engine.undo()}>
+        <IconButton className="md:hidden" label={t('newLabelTitle')} onClick={() => setNewOpen(true)}>
+          <Plus size={20} />
+        </IconButton>
+        <Button className="hidden md:inline-flex" onClick={() => setNewOpen(true)}>
+          <Plus size={16} />
+          {t('newLabel')}
+        </Button>
+        <IconButton label={t('undo')} shortcut={`${mod}+Z`} keys="Control+Z Meta+Z" disabled={!state.canUndo} onClick={() => engine.undo()}>
           <Undo2 size={20} />
         </IconButton>
-        <IconButton label={`${t('redo')} (${mod}+Shift+Z)`} aria-keyshortcuts="Control+Shift+Z" disabled={!state.canRedo} onClick={() => engine.redo()}>
+        <IconButton label={t('redo')} shortcut={`${mod}+Shift+Z`} keys="Control+Shift+Z Meta+Shift+Z" disabled={!state.canRedo} onClick={() => engine.redo()}>
           <Redo2 size={20} />
         </IconButton>
         <div className="min-w-2 flex-1" />
@@ -276,13 +299,14 @@ export function Shell() {
           <IconButton label={t('language')} onClick={() => setLang(lang === 'ru' ? 'en' : 'ru')}>
             <Languages size={20} />
           </IconButton>
-          <IconButton label={t('theme')} aria-expanded={menu === 'theme'} onClick={() => setMenu(menu === 'theme' ? null : 'theme')}>
+          <IconButton label={t('theme')} aria-expanded={menu === 'theme'} aria-haspopup="menu" onClick={() => setMenu(menu === 'theme' ? null : 'theme')}>
             {theme === 'light' ? <Sun size={20} /> : <Moon size={20} />}
           </IconButton>
         </div>
         <button
           type="button"
           aria-expanded={menu === 'file'}
+          aria-haspopup="menu"
           className="h-11 shrink-0 rounded-full border border-[var(--border)] px-3 text-sm font-bold hover:bg-[var(--hover)]"
           onClick={() => setMenu(menu === 'file' ? null : 'file')}
         >
@@ -303,24 +327,30 @@ export function Shell() {
         </Button>
         </div>
         {menu === 'theme' && (
-          <div className="menu-pop absolute right-3 top-14 z-40 w-44 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-1 shadow-xl">
+          <Menu label={t('theme')} onClose={() => setMenu(null)} className="menu-pop fixed right-2 top-14 z-40 w-44 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-1 shadow-xl">
             {(['dark', 'dim', 'light'] as ThemeName[]).map((item) => (
-              <button
+              <MenuItem
                 key={item}
-                type="button"
-                className="block w-full rounded-xl px-3 py-2 text-left text-sm font-bold hover:bg-[var(--hover)]"
                 onClick={() => {
                   setTheme(item)
                   setMenu(null)
                 }}
               >
                 {item === 'dark' ? t('themeDark') : item === 'dim' ? t('themeDim') : t('themeLight')}
-              </button>
+              </MenuItem>
             ))}
-          </div>
+          </Menu>
         )}
         {menu === 'file' && (
-          <div className="menu-pop absolute right-2 top-14 z-40 max-h-[70dvh] w-56 overflow-auto rounded-2xl border border-[var(--border)] bg-[var(--card)] p-1 shadow-xl">
+          <Menu label={t('file')} onClose={() => setMenu(null)} className="menu-pop fixed right-2 top-14 z-40 max-h-[70dvh] w-56 overflow-auto rounded-2xl border border-[var(--border)] bg-[var(--card)] p-1 shadow-xl">
+            <MenuItem
+              onClick={() => {
+                setNewOpen(true)
+                setMenu(null)
+              }}
+            >
+              {t('newLabelTitle')}
+            </MenuItem>
             <MenuItem
               onClick={() => {
                 void saveCurrent()
@@ -329,6 +359,7 @@ export function Shell() {
             >
               {t('save')}
             </MenuItem>
+            <div className="my-1 h-px bg-[var(--border)]" role="separator" />
             <MenuItem onClick={() => void exportPng(false)}>{t('exportPng')}</MenuItem>
             <MenuItem onClick={() => void exportPng(true)}>{t('exportBit')}</MenuItem>
             <MenuItem onClick={() => void exportSvg()}>{t('exportSvg')}</MenuItem>
@@ -339,24 +370,30 @@ export function Shell() {
                 } catch {
                   toast(t('exportFail'))
                 }
+                setMenu(null)
               }}
             >
               {t('exportJson')}
             </MenuItem>
-            <label className="block cursor-pointer rounded-xl px-3 py-2 text-sm font-bold hover:bg-[var(--hover)]">
+            <MenuItem
+              onClick={() => {
+                importRef.current?.click()
+              }}
+            >
               {t('importJson')}
-              <input
-                type="file"
-                accept="application/json,.json"
-                hidden
-                onChange={(event) => {
-                  const file = event.target.files?.[0]
-                  if (file) void importJson(file)
-                  event.target.value = ''
-                  setMenu(null)
-                }}
-              />
-            </label>
+            </MenuItem>
+            <input
+              ref={importRef}
+              type="file"
+              accept="application/json,.json"
+              hidden
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                if (file) void importJson(file)
+                event.target.value = ''
+                setMenu(null)
+              }}
+            />
             <MenuItem
               onClick={() => {
                 setBatchOpen(true)
@@ -392,27 +429,30 @@ export function Shell() {
                 {item === 'dark' ? t('themeDark') : item === 'dim' ? t('themeDim') : t('themeLight')}
               </MenuItem>
             ))}
-            <MenuItem
-              onClick={() => {
-                setNewOpen(true)
-                setMenu(null)
-              }}
-            >
-              {t('newLabelTitle')}
-            </MenuItem>
             <PinLockItem label={t('pinLock')} />
-          </div>
+          </Menu>
         )}
         {menu === 'size' && (
-          <div className="menu-pop absolute left-2 top-14 z-40 max-h-[70dvh] w-[min(100vw-1rem,28rem)] overflow-auto rounded-3xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-2xl sm:left-16">
+          <div role="group" aria-label={t('size')} className="menu-pop fixed left-2 top-14 z-40 max-h-[70dvh] w-[min(100vw-1rem,28rem)] overflow-auto rounded-3xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-2xl sm:left-16">
+            <Button
+              className="mb-3 w-full"
+              onClick={() => {
+                setMenu(null)
+                setNewOpen(true)
+              }}
+            >
+              <Plus size={16} />
+              {t('newLabelTitle')}
+            </Button>
             <label className="mb-3 block text-xs text-[var(--muted)]">
               {t('designName')}
               <TextInput className="mt-1" value={state.name} onChange={(event) => engine.setName(event.target.value)} />
             </label>
             <p className="mb-2 text-xs leading-5 text-[var(--muted)]">{t('tapeNote')}</p>
-            <Button className="mb-2" disabled={reading || link.printing} onClick={() => void runDetectLabelBusy(t, setReading)}>
-              {reading ? '…' : t('detectLabel')}
+            <Button className="mb-2" disabled={reading || link.printing || link.status !== 'connected'} onClick={() => void runDetectLabelBusy(t, setReading)}>
+              {reading ? t('detecting') : t('detectLabel')}
             </Button>
+            {link.status !== 'connected' && <p className="mb-2 text-xs leading-5 text-[var(--muted)]">{t('detectLabelNeed')}</p>}
             {roll && (
               <p className="mb-2 text-xs leading-5 text-[var(--muted)]">
                 {t('labelStock', {
@@ -546,7 +586,8 @@ export function Shell() {
         <div className="flex items-start gap-2 border-b border-[var(--border)] bg-[var(--elev)] px-3 py-2 text-xs leading-5 text-[var(--muted)]">
           <Bluetooth size={14} className="mt-0.5 shrink-0" />
           <span className="min-w-0 flex-1">
-            {block === 'insecure-ios' ? t('insecureIos') : block === 'insecure' ? t('insecure') : block === 'ios' ? t('browserBannerIos') : t('browserBanner')}
+            <span className="sm:hidden">{bannerCopy(block, true)}</span>
+            <span className="hidden sm:inline">{bannerCopy(block, false)}</span>
           </span>
           <button
             type="button"
@@ -571,13 +612,34 @@ export function Shell() {
           <LayerList />
         </aside>
         <main className="relative min-w-0 flex-1">
-          <Stage />
+          <Stage onCreate={() => setNewOpen(true)} coachOpen={coach} />
+          {coach && (
+            <div className="pointer-events-none absolute top-10 left-3 z-20 max-w-xs">
+              <div className="pointer-events-auto rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-lg">
+                <p className="text-sm font-bold">{t('coachTitle')}</p>
+                <p className="mt-1 text-xs leading-5 text-[var(--muted)]">{t('coachBody')}</p>
+                <Button
+                  className="mt-2"
+                  onClick={() => {
+                    try {
+                      localStorage.setItem('metka.coach', '1')
+                    } catch {
+                      /* private mode */
+                    }
+                    setCoach(false)
+                  }}
+                >
+                  {t('coachDismiss')}
+                </Button>
+              </div>
+            </div>
+          )}
         </main>
         <aside className="hidden w-[320px] shrink-0 border-l border-[var(--border)] md:flex md:flex-col">
           <Inspector />
         </aside>
       </div>
-      <nav className="flex shrink-0 border-t border-[var(--border)] pb-[env(safe-area-inset-bottom)] md:hidden">
+      <nav aria-label={t('sections')} className="flex shrink-0 border-t border-[var(--border)] pb-[env(safe-area-inset-bottom)] md:hidden">
         <NavButton icon={<Plus size={18} />} active={sheet === 'tools'} onClick={() => setSheet(sheet === 'tools' ? null : 'tools')}>
           {t('tools')}
         </NavButton>
@@ -644,18 +706,18 @@ function ShortcutDialog({ mod, onClose }: { mod: string; onClose: () => void }) 
     [t('redo'), `${mod}+Shift+Z`],
     [t('duplicate'), `${mod}+D`],
     [t('keyPaste'), `${mod}+V`],
-    [t('deleteObj'), 'Delete'],
+    [t('deleteObj'), t('keyDelete')],
     [t('keySelectAll'), `${mod}+A`],
     [t('keyNudge'), t('keyArrows')],
     [t('keyNudgeFast'), t('keyShiftArrows')],
     [t('keyGroup'), `${mod}+G`],
     [t('keyUngroup'), `${mod}+Shift+G`],
     [t('keyScale'), 'K'],
-    [t('keyAltDrag'), 'Alt + drag'],
+    [t('keyAltDrag'), t('keyAltDragHow')],
     [t('keyEdit'), t('keyEditHow')],
     [t('fit'), `${mod}+0`],
-    [t('zoomIn'), `${mod}++`],
-    [t('zoomOut'), `${mod}+−`],
+    [t('zoomIn'), `${mod} + +`],
+    [t('zoomOut'), `${mod} + −`],
     [t('keyDeselect'), 'Esc'],
     [t('keyPan'), t('keyPanHow')],
     [t('keyPinch'), t('keyPinchHow')],
@@ -681,7 +743,7 @@ function ShortcutDialog({ mod, onClose }: { mod: string; onClose: () => void }) 
 
 function MenuItem({ children, onClick }: { children: string; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className="block w-full rounded-xl px-3 py-2 text-left text-sm font-bold hover:bg-[var(--hover)]">
+    <button type="button" role="menuitem" onClick={onClick} className="block min-h-11 w-full rounded-xl px-3 py-2 text-left text-sm font-bold hover:bg-[var(--hover)]">
       {children}
     </button>
   )

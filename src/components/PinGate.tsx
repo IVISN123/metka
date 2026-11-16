@@ -23,7 +23,7 @@ export function PinLockItem({ label }: { label: string }) {
   const { enabled, lock } = useContext(PinLockContext)
   if (!enabled) return null
   return (
-    <button type="button" onClick={lock} className="block w-full rounded-xl px-3 py-2 text-left text-sm font-bold hover:bg-[var(--hover)]">
+    <button type="button" role="menuitem" onClick={lock} className="block min-h-11 w-full rounded-xl px-3 py-2 text-left text-sm font-bold hover:bg-[var(--hover)]">
       {label}
     </button>
   )

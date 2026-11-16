@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import {
   AlignCenter,
   AlignCenterVertical,
@@ -29,9 +29,11 @@ import {
   Lock,
   Minus,
   QrCode,
+  RotateCw,
   Sparkles,
   Square,
   Trash2,
+  Triangle,
   Type,
   Underline,
   Unlock,
@@ -80,14 +82,14 @@ export function ToolPanel({ onPicked }: { onPicked?: () => void }) {
     { key: 'icons', icon: Sparkles, run: () => setIconsOpen(true) },
     { key: 'shapes', icon: Square, run: () => setShapesOpen((open) => !open) },
     { key: 'line', icon: Minus, run: () => { engine.addLine(); picked() } },
-    { key: 'barcode', icon: Barcode, run: () => void engine.addBarcode().then(picked).catch((error: unknown) => toast(String(error))) },
+    { key: 'barcode', icon: Barcode, run: () => void engine.addBarcode().then(picked).catch(() => toast(t('barcodeError'))) },
     { key: 'qr', icon: QrCode, run: () => void engine.addQr().then(picked) },
     { key: 'datetime', icon: Clock, run: () => { engine.addDatetime(); picked() } },
   ]
   return (
     <div className="border-b border-[var(--border)] p-3">
-      <div className="mb-2 text-xs font-bold uppercase tracking-wide text-[var(--muted)]">{t('add')}</div>
-      <div className="grid grid-cols-4 gap-1">
+      <div className="mb-2 text-xs font-bold text-[var(--muted)]">{t('add')}</div>
+      <div role="toolbar" aria-label={t('add')} className="grid grid-cols-4 gap-1">
         {tools.map((tool) => (
           <button
             key={tool.key}
@@ -124,7 +126,7 @@ export function ToolPanel({ onPicked }: { onPicked?: () => void }) {
           <ShapeButton label={t('rect')} onClick={() => { engine.addShape('rect'); onPicked?.() }} icon={<Square size={16} />} />
           <ShapeButton label={t('round')} onClick={() => { engine.addShape('round'); onPicked?.() }} icon={<Square size={16} />} />
           <ShapeButton label={t('ellipse')} onClick={() => { engine.addShape('ellipse'); onPicked?.() }} icon={<Circle size={16} />} />
-          <ShapeButton label={t('triangle')} onClick={() => { engine.addShape('triangle'); onPicked?.() }} icon={<span className="text-sm">△</span>} />
+          <ShapeButton label={t('triangle')} onClick={() => { engine.addShape('triangle'); onPicked?.() }} icon={<Triangle size={16} />} />
         </div>
       )}
     </div>
@@ -147,6 +149,7 @@ export function LayerList() {
   const [editing, setEditing] = useState<string | null>(null)
   const [drop, setDrop] = useState<{ id: string; place: 'before' | 'after' | 'into' } | null>(null)
   const reduced = useReducedMotion()
+  const headingId = useId()
   const listRef = useRef<HTMLUListElement>(null)
   const tops = useRef(new Map<string, number>())
   const visible = state.layers.filter((layer) => {
@@ -177,9 +180,9 @@ export function LayerList() {
   }, [signature, reduced])
   return (
     <div className="min-h-0 flex-1 overflow-auto p-3">
-      <div className="mb-2 text-xs font-bold uppercase tracking-wide text-[var(--muted)]">{t('layers')}</div>
-      {visible.length === 0 && <p className="text-sm text-[var(--muted)]">{t('emptyLayers')}</p>}
-      <ul ref={listRef} className="flex flex-col">
+      <div id={headingId} className="mb-2 text-xs font-bold text-[var(--muted)]">{t('layers')}</div>
+      {visible.length === 0 && <p className="text-sm leading-5 text-[var(--muted)]">{t('emptyLayers')}</p>}
+      <ul ref={listRef} aria-labelledby={headingId} className="flex flex-col">
         {visible.map((layer) => (
           <LayerRow
             key={layer.id}
@@ -193,6 +196,12 @@ export function LayerList() {
             onEdit={() => setEditing(layer.id)}
             onEditDone={() => setEditing(null)}
             onGripDown={(event) => startLayerDrag(event, layer.id, setDrop)}
+            onReorder={(dir) => {
+              const index = visible.findIndex((item) => item.id === layer.id)
+              const neighbor = visible[index + (dir === 'up' ? -1 : 1)]
+              if (!neighbor || neighbor.parentId !== layer.parentId) return
+              engine.moveLayer(layer.id, neighbor.id, dir === 'up' ? 'before' : 'after')
+            }}
           />
         ))}
       </ul>
@@ -257,6 +266,7 @@ function LayerRow({
   onEdit,
   onEditDone,
   onGripDown,
+  onReorder,
 }: {
   layer: LayerInfo
   active: boolean
@@ -268,6 +278,7 @@ function LayerRow({
   onEdit: () => void
   onEditDone: () => void
   onGripDown: (event: ReactPointerEvent<HTMLButtonElement>) => void
+  onReorder: (dir: 'up' | 'down') => void
 }) {
   const { t } = useI18n()
   const Icon = KIND_ICON[layer.kind]
@@ -281,7 +292,7 @@ function LayerRow({
     >
       {nested ? (
         <button type="button" aria-label={collapsed ? t('expandGroup') : t('collapseGroup')} className="grid h-11 w-6 shrink-0 place-items-center text-[var(--muted)]" onClick={onToggle}>
-          <ChevronRight size={14} className={`transition-transform ${collapsed ? '' : 'rotate-90'}`} />
+          <ChevronRight size={14} className={`motion-safe:transition-transform ${collapsed ? '' : 'rotate-90'}`} />
         </button>
       ) : (
         <span className="w-6 shrink-0" />
@@ -289,9 +300,16 @@ function LayerRow({
       <button
         type="button"
         aria-label={t('reorder')}
-        title={t('reorder')}
-        className="grid h-11 w-7 shrink-0 cursor-grab place-items-center text-[var(--icon)] active:cursor-grabbing"
+        title={`${t('reorder')} (${t('keyReorder')})`}
+        aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+        className="grid h-11 w-11 shrink-0 cursor-grab place-items-center text-[var(--icon)] active:cursor-grabbing md:w-8"
         onPointerDown={onGripDown}
+        onKeyDown={(event) => {
+          if (!event.altKey) return
+          if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+          event.preventDefault()
+          onReorder(event.key === 'ArrowUp' ? 'up' : 'down')
+        }}
       >
         <GripVertical size={16} />
       </button>
@@ -316,16 +334,18 @@ function LayerRow({
           type="button"
           onClick={(event) => engine.select(layer.id, event.shiftKey)}
           onDoubleClick={onEdit}
+          title={layer.name}
+          aria-current={active ? 'true' : undefined}
           className={`flex h-11 min-w-0 flex-1 items-center gap-2 text-left text-sm ${layer.visible ? 'text-[var(--text)]' : 'text-[var(--muted)]'}`}
         >
           <Icon size={16} className="shrink-0 text-[var(--icon)]" />
           <span className="truncate">{layer.name}</span>
         </button>
       )}
-      <IconButton label={layer.visible ? t('hide') : t('show')} onClick={() => engine.toggleVisible(layer.id)}>
+      <IconButton className="md:w-9" label={layer.visible ? t('hide') : t('show')} onClick={() => engine.toggleVisible(layer.id)}>
         {layer.visible ? <Eye size={15} /> : <EyeOff size={15} />}
       </IconButton>
-      <IconButton label={layer.locked ? t('unlock') : t('lock')} onClick={() => engine.toggleLock(layer.id)}>
+      <IconButton className="md:w-9" label={layer.locked ? t('unlock') : t('lock')} onClick={() => engine.toggleLock(layer.id)}>
         {layer.locked ? <Lock size={15} /> : <Unlock size={15} />}
       </IconButton>
     </li>
@@ -362,12 +382,12 @@ export function Inspector() {
             <IconButton label={t('alignTop')} onClick={() => engine.align('top')}><AlignStartVertical size={18} /></IconButton>
             <IconButton label={t('alignMiddle')} onClick={() => engine.align('middle')}><AlignCenterVertical size={18} /></IconButton>
             <IconButton label={t('alignBottom')} onClick={() => engine.align('bottom')}><AlignEndVertical size={18} /></IconButton>
-            <IconButton label={t('duplicate')} onClick={() => void engine.duplicate()}><Copy size={18} /></IconButton>
-            <IconButton label={t('group')} disabled={state.multi < 2} onClick={() => engine.groupSelected()}><GroupIcon size={18} /></IconButton>
+            <IconButton label={t('duplicate')} shortcut="Ctrl+D" keys="Control+D Meta+D" onClick={() => void engine.duplicate()}><Copy size={18} /></IconButton>
+            <IconButton label={t('group')} shortcut="Ctrl+G" keys="Control+G Meta+G" disabled={state.multi < 2} onClick={() => engine.groupSelected()}><GroupIcon size={18} /></IconButton>
             <IconButton label={t('ungroup')} disabled={selected?.kind !== 'group'} onClick={() => engine.ungroupSelected()}><Ungroup size={18} /></IconButton>
             <IconButton label={t('distributeH')} disabled={state.multi < 3} onClick={() => engine.distribute('x')}><AlignHorizontalSpaceAround size={18} /></IconButton>
             <IconButton label={t('distributeV')} disabled={state.multi < 3} onClick={() => engine.distribute('y')}><AlignVerticalSpaceAround size={18} /></IconButton>
-            <IconButton label={t('deleteObj')} onClick={() => engine.deleteSelected()}><Trash2 size={16} /></IconButton>
+            <IconButton label={t('deleteObj')} shortcut={t('keyDelete')} keys="Delete Backspace" onClick={() => engine.deleteSelected()}><Trash2 size={16} /></IconButton>
           </div>
         )}
         {selected && (
@@ -377,11 +397,11 @@ export function Inspector() {
             </Field>
             {selected.frame && (
               <div className="grid grid-cols-2 gap-1.5">
-                <ScrubField label="X" value={selected.frame.x} min={-40} max={240} onGestureStart={() => engine.beginGesture()} onGestureEnd={() => engine.endGesture()} onChange={(xMm) => engine.setFrame({ xMm })} />
-                <ScrubField label="Y" value={selected.frame.y} min={-40} max={240} onGestureStart={() => engine.beginGesture()} onGestureEnd={() => engine.endGesture()} onChange={(yMm) => engine.setFrame({ yMm })} />
-                <ScrubField label="W" value={selected.frame.w} min={0.2} max={240} onGestureStart={() => engine.beginGesture()} onGestureEnd={() => engine.endGesture()} onChange={(wMm) => engine.setFrame({ wMm })} />
-                <ScrubField label="H" value={selected.frame.h} min={0.2} max={240} onGestureStart={() => engine.beginGesture()} onGestureEnd={() => engine.endGesture()} onChange={(hMm) => engine.setFrame({ hMm })} />
-                <ScrubField label="°" value={selected.angle} min={-180} max={180} step={1} onGestureStart={() => engine.beginGesture()} onGestureEnd={() => engine.endGesture()} onChange={(angle) => void engine.updateSelected({ angle })} />
+                <ScrubField label={t('posX')} value={selected.frame.x} min={-40} max={240} onGestureStart={() => engine.beginGesture()} onGestureEnd={() => engine.endGesture()} onChange={(xMm) => engine.setFrame({ xMm })} />
+                <ScrubField label={t('posY')} value={selected.frame.y} min={-40} max={240} onGestureStart={() => engine.beginGesture()} onGestureEnd={() => engine.endGesture()} onChange={(yMm) => engine.setFrame({ yMm })} />
+                <ScrubField label={t('posW')} value={selected.frame.w} min={0.2} max={240} onGestureStart={() => engine.beginGesture()} onGestureEnd={() => engine.endGesture()} onChange={(wMm) => engine.setFrame({ wMm })} />
+                <ScrubField label={t('posH')} value={selected.frame.h} min={0.2} max={240} onGestureStart={() => engine.beginGesture()} onGestureEnd={() => engine.endGesture()} onChange={(hMm) => engine.setFrame({ hMm })} />
+                <ScrubField label={t('angle')} glyph={<RotateCw size={14} />} value={selected.angle} min={-180} max={180} step={1} onGestureStart={() => engine.beginGesture()} onGestureEnd={() => engine.endGesture()} onChange={(angle) => void engine.updateSelected({ angle })} />
               </div>
             )}
             {selected.frame && <p className="text-[11px] leading-4 text-[var(--muted)]">{t('transformHint')}</p>}
@@ -684,7 +704,7 @@ function LivePreview({ rev, ready, label, hint }: { rev: number; ready: boolean;
       <div className="mb-1 text-sm font-bold">{label}</div>
       <p className="mb-3 text-xs leading-5 text-[var(--muted)]">{hint}</p>
       <div className="rounded-xl bg-white p-2">
-        {url ? <img src={url} alt="" className="pixelated mx-auto max-h-48 w-full object-contain" /> : <div className="h-16" />}
+        {url ? <img src={url} alt={label} className="pixelated mx-auto max-h-48 w-full object-contain" /> : <div className="h-16" />}
       </div>
       {stats && <p className="mt-2 text-xs text-[var(--muted)]">{stats}</p>}
       {warn && <p className="mt-1 text-xs text-[var(--danger)]">{warn}</p>}

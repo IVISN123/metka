@@ -1,11 +1,12 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useSyncExternalStore } from 'react'
 import { engine } from '../engine/editor'
-import { PRESETS, presetGroup, presetSearchText } from '../lib/presets'
+import { PRESETS, modelForLabel, presetGroup, presetSearchText } from '../lib/presets'
 import { thumbnailOf } from '../lib/render'
 import { saveTemplate } from '../lib/storage'
 import { storageErrorCode } from '../lib/errors'
 import { defaultCornerMm } from '../lib/editor-ui'
-import { uid } from '../lib/units'
+import { modelLabel, uid } from '../lib/units'
+import { printer } from '../printer/controller'
 import { toast } from '../toast'
 import { useI18n } from './state'
 import { useEngine } from './Stage'
@@ -14,6 +15,7 @@ import { Button, Field, Modal, Slider, TextInput } from './ui'
 export function NewLabelDialog({ onClose }: { onClose: () => void }) {
   const { t, lang } = useI18n()
   const { state } = useEngine()
+  const link = useSyncExternalStore(printer.subscribe, printer.getSnapshot, printer.getSnapshot)
   const [query, setQuery] = useState('')
   const [width, setWidth] = useState(String(state.widthMm))
   const [height, setHeight] = useState(String(state.heightMm))
@@ -45,6 +47,11 @@ export function NewLabelDialog({ onClose }: { onClose: () => void }) {
     return { widthMm, heightMm }
   }
 
+  const widthMm = Number(width.replace(',', '.'))
+  const heightMm = Number(height.replace(',', '.'))
+  const suggested = Number.isFinite(widthMm) && Number.isFinite(heightMm) ? modelForLabel(state.model, widthMm, heightMm) : state.model
+  const fitNote = link.status !== 'connected' && suggested !== state.model ? t('modelFit', { from: modelLabel(state.model), to: modelLabel(suggested) }) : ''
+
   const create = async (save: boolean) => {
     const size = readSize()
     if (!size) {
@@ -55,7 +62,8 @@ export function NewLabelDialog({ onClose }: { onClose: () => void }) {
     setBusy(true)
     try {
       const labelName = name.trim() || `${size.widthMm}×${size.heightMm}`
-      const ok = await engine.newBlank({ ...size, cornerMm: corner, name: labelName })
+      const model = link.status === 'connected' ? undefined : modelForLabel(state.model, size.widthMm, size.heightMm)
+      const ok = await engine.newBlank({ ...size, cornerMm: corner, name: labelName, model: model === state.model ? undefined : model })
       if (!ok) {
         toast(t('badSize'))
         return
@@ -138,6 +146,7 @@ export function NewLabelDialog({ onClose }: { onClose: () => void }) {
             <TextInput value={height} inputMode="decimal" onChange={(event) => { setHeight(event.target.value); setPicked(null) }} />
           </Field>
         </div>
+        {fitNote && <p className="text-sm leading-6 text-[var(--muted)]">{fitNote}</p>}
         <Field label={t('labelName')}>
           <TextInput value={name} onChange={(event) => setName(event.target.value)} placeholder={t('templatePh')} />
         </Field>

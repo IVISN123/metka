@@ -1131,26 +1131,31 @@ export class EditorEngine {
     this.drawGuides()
   }
 
-  async newBlank(input: { name: string; widthMm: number; heightMm: number; cornerMm: number }) {
+  async newBlank(input: { name: string; widthMm: number; heightMm: number; cornerMm: number; model?: string }) {
     if (!Number.isFinite(input.widthMm) || !Number.isFinite(input.heightMm)) return false
     const blank = await buildBuiltin('blank')
-    const bounded = clampSize(input.widthMm, input.heightMm, this.snapshot.dpi)
-    const corner = Math.round(clamp(input.cornerMm, 0, 8) * 10) / 10
     const state = this.snapshot
+    const meta = input.model ? metaFor(input.model) : undefined
+    const model = meta && input.model ? input.model : state.model
+    const dpi = meta?.dpi ?? state.dpi
+    const bounded = clampSize(input.widthMm, input.heightMm, dpi)
+    const corner = Math.round(clamp(input.cornerMm, 0, 8) * 10) / 10
+    const suggestion = meta ? suggestedTask(model) : null
+    const labelType = meta && !meta.paperTypes.includes(state.labelType) ? (meta.paperTypes[0] ?? state.labelType) : state.labelType
     await this.loadDocument(
       {
         ...blank,
         name: input.name.trim() || blank.name,
         widthMm: bounded.widthMm,
         heightMm: bounded.heightMm,
-        dpi: state.dpi,
-        model: state.model,
-        direction: state.direction,
-        labelType: state.labelType,
-        density: state.density,
+        dpi,
+        model,
+        direction: meta ? (meta.printDirection === 'left' ? 'left' : 'top') : state.direction,
+        labelType,
+        density: meta?.densityDefault ?? state.density,
         quantity: 1,
         align: state.align,
-        task: state.task,
+        task: suggestion?.task ?? state.task,
         taskAuto: state.taskAuto,
         preview: state.preview,
         cornerMm: corner,
