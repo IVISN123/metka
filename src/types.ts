@@ -146,6 +146,9 @@ export type EditorState = {
   contentRev: number
   workspace: string
   cornerMm: number
+  gridOn: boolean
+  gridStep: number
+  snapGrid: boolean
 }
 
 export type RfidView = {
@@ -225,4 +228,7 @@ export const initialEditorState = (): EditorState => ({
   contentRev: 0,
   workspace: '#000000',
   cornerMm: 1.5,
+  gridOn: false,
+  gridStep: 1,
+  snapGrid: false,
 })

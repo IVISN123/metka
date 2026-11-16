@@ -170,17 +170,80 @@ export function defaultCornerMm(widthMm: number, heightMm: number): number {
   return 3
 }
 
-export function rulerMarks(startMm: number, endMm: number, pxPerMm: number): { mm: number; level: 1 | 5 | 10 }[] {
-  if (!Number.isFinite(pxPerMm) || pxPerMm <= 0) return []
-  const marks: { mm: number; level: 1 | 5 | 10 }[] = []
-  const first = Math.ceil(startMm - 1e-6)
-  const last = Math.floor(endMm + 1e-6)
-  const minor = pxPerMm >= 5
-  for (let step = first; step <= last; step += 1) {
-    const mm = step === 0 ? 0 : step
-    if (mm % 10 === 0) marks.push({ mm, level: 10 })
-    else if (mm % 5 === 0) marks.push({ mm, level: 5 })
-    else if (minor) marks.push({ mm, level: 1 })
+export const GRID_STEPS = [0.5, 1, 2, 5, 10] as const
+export type GridStep = (typeof GRID_STEPS)[number]
+
+export function normalizeGridStep(value: number): GridStep {
+  return GRID_STEPS.find((step) => step === value) ?? 1
+}
+
+export type RulerRank = 'minor' | 'mid' | 'label' | 'edge'
+
+const RANK: Record<RulerRank, number> = { minor: 0, mid: 1, label: 2, edge: 3 }
+
+function positiveMod(value: number, step: number) {
+  const mod = value % step
+  return mod < 0 ? mod + step : mod
+}
+
+/** Label spacing that stays readable: at least ~34px between numbers. */
+export function rulerStepMm(pxPerMm: number): number {
+  if (!(pxPerMm > 0)) return 10
+  for (const step of [1, 2, 5, 10, 20, 50, 100]) {
+    if (step * pxPerMm >= 34) return step
   }
-  return marks
+  return 100
+}
+
+export function mmOnLabel(mm: number, originPx: number, labelPx: number, labelMm: number): number {
+  if (!(labelMm > 0)) return originPx
+  return originPx + (mm / labelMm) * labelPx
+}
+
+export function rulerLayout(input: {
+  startMm: number
+  endMm: number
+  pxPerMm: number
+  originPx: number
+  labelPx: number
+  labelMm: number
+}): { mm: number; x: number; rank: RulerRank }[] {
+  const { startMm, endMm, pxPerMm, originPx, labelPx, labelMm } = input
+  if (!(pxPerMm > 0) || !(labelMm > 0) || !(labelPx > 0)) return []
+  const step = rulerStepMm(pxPerMm)
+  const mid = step >= 2 && (step / 2) * pxPerMm >= 8 ? step / 2 : 0
+  const showMinor = pxPerMm >= 5
+  const ranks = new Map<number, RulerRank>()
+  const put = (mm: number, rank: RulerRank) => {
+    if (!Number.isFinite(mm)) return
+    const key = Math.round(mm * 1000) / 1000
+    const prev = ranks.get(key)
+    if (prev === undefined || RANK[rank] > RANK[prev]) ranks.set(key, rank)
+  }
+  const first = Math.floor(startMm)
+  const last = Math.ceil(endMm)
+  for (let mm = first; mm <= last; mm += 1) {
+    const clean = mm === 0 ? 0 : mm
+    if (positiveMod(clean, step) === 0) put(clean, 'label')
+    else if (mid && positiveMod(clean, mid) === 0) put(clean, 'mid')
+    else if (showMinor) put(clean, 'minor')
+  }
+  put(0, 'edge')
+  put(labelMm, 'edge')
+  return [...ranks.entries()]
+    .map(([mm, rank]) => ({ mm, x: mmOnLabel(mm, originPx, labelPx, labelMm), rank }))
+    .filter((mark) => mark.mm >= startMm - 0.001 && mark.mm <= endMm + 0.001)
+    .sort((a, b) => a.mm - b.mm)
+}
+
+export function gridStops(labelPx: number, labelMm: number, stepMm: number): number[] {
+  if (!(labelPx > 0) || !(labelMm > 0) || !(stepMm > 0)) return []
+  const stops: number[] = []
+  const count = Math.ceil(labelMm / stepMm)
+  for (let index = 0; index <= count; index += 1) {
+    const mm = Math.min(labelMm, Math.round(index * stepMm * 1000) / 1000)
+    stops.push(mmOnLabel(mm, 0, labelPx, labelMm))
+    if (mm >= labelMm) break
+  }
+  return stops
 }
