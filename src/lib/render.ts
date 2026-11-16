@@ -5,6 +5,7 @@ import { ensureFontsReady } from './fonts'
 import { materialize } from './materialize'
 import { rasterLimit } from './limits'
 import { mmToPx } from './units'
+import { prepareScene } from './scene-paint'
 
 function readMeta(obj: FabricObject): Meta | undefined {
   const data = (obj as FabricObject & { data?: Meta }).data
@@ -22,6 +23,7 @@ async function loadScene(doc: LabelDocument, width: number, height: number, back
     renderOnAddRemove: false,
   })
   await canvas.loadFromJSON(doc.canvas)
+  prepareScene(canvas.getObjects())
   canvas.backgroundColor = background
   canvas.renderAll()
   return canvas

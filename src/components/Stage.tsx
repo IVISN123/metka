@@ -59,6 +59,11 @@ export function Stage() {
           event.target.value = ''
         }}
       />
+      {state.scaleTool && (
+        <div className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-full border border-[var(--border)] bg-[var(--card)] px-3 py-1 text-xs font-bold shadow-lg">
+          {t('scaleToolOn')}
+        </div>
+      )}
       {!state.ready && (
         <div className="absolute inset-0 z-20 grid place-items-center text-sm text-[var(--muted)]">{t('loading')}</div>
       )}

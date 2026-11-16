@@ -293,7 +293,7 @@ export function Shell() {
         </Button>
         </div>
         {menu === 'theme' && (
-          <div className="absolute right-3 top-14 z-40 w-44 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-1 shadow-xl">
+          <div className="menu-pop absolute right-3 top-14 z-40 w-44 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-1 shadow-xl">
             {(['dark', 'dim', 'light'] as ThemeName[]).map((item) => (
               <button
                 key={item}
@@ -310,7 +310,7 @@ export function Shell() {
           </div>
         )}
         {menu === 'file' && (
-          <div className="absolute right-2 top-14 z-40 max-h-[70dvh] w-56 overflow-auto rounded-2xl border border-[var(--border)] bg-[var(--card)] p-1 shadow-xl">
+          <div className="menu-pop absolute right-2 top-14 z-40 max-h-[70dvh] w-56 overflow-auto rounded-2xl border border-[var(--border)] bg-[var(--card)] p-1 shadow-xl">
             <MenuItem
               onClick={() => {
                 void saveCurrent()
@@ -393,7 +393,7 @@ export function Shell() {
           </div>
         )}
         {menu === 'size' && (
-          <div className="absolute left-2 top-14 z-40 max-h-[70dvh] w-[min(100vw-1rem,28rem)] overflow-auto rounded-3xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-2xl sm:left-16">
+          <div className="menu-pop absolute left-2 top-14 z-40 max-h-[70dvh] w-[min(100vw-1rem,28rem)] overflow-auto rounded-3xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-2xl sm:left-16">
             <label className="mb-3 block text-xs text-[var(--muted)]">
               {t('designName')}
               <TextInput className="mt-1" value={state.name} onChange={(event) => engine.setName(event.target.value)} />
@@ -589,7 +589,7 @@ export function Shell() {
       </nav>
       {sheet && (
         <div
-          className="absolute inset-x-0 z-30 flex max-h-[62dvh] flex-col overflow-hidden border-t border-[var(--border)] bg-[var(--card)] md:hidden"
+          className="sheet-pop absolute inset-x-0 z-30 flex max-h-[62dvh] flex-col overflow-hidden border-t border-[var(--border)] bg-[var(--card)] md:hidden"
           style={{ bottom: 'calc(3.5rem + env(safe-area-inset-bottom))' }}
         >
           <div className="flex items-center justify-end px-2 pt-1">
@@ -637,6 +637,11 @@ function ShortcutDialog({ mod, onClose }: { mod: string; onClose: () => void }) 
     [t('keySelectAll'), `${mod}+A`],
     [t('keyNudge'), t('keyArrows')],
     [t('keyNudgeFast'), t('keyShiftArrows')],
+    [t('keyGroup'), `${mod}+G`],
+    [t('keyUngroup'), `${mod}+Shift+G`],
+    [t('keyScale'), 'K'],
+    [t('keyAltDrag'), 'Alt + drag'],
+    [t('keyEdit'), t('keyEditHow')],
     [t('fit'), `${mod}+0`],
     [t('zoomIn'), `${mod}++`],
     [t('zoomOut'), `${mod}+−`],

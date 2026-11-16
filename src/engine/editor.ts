@@ -47,12 +47,26 @@ import {
 } from '../lib/editor-ui'
 import { toast } from '../toast'
 import { clamp, clampCopies, clampDpi, clampSize, formatDate, mmToPx, uid, verticalize } from '../lib/units'
+import { bakeVectorInPlace, noteTextGesture, scaleToolOn, setScaleTool, styleObject } from './chrome'
+import { prepareObject, prepareScene, vectorOf } from '../lib/scene-paint'
+import {
+  commitHistory,
+  measureGaps,
+  nudgeStepPx,
+  reorderFrontToBack,
+  snapTranslation,
+  textResize,
+  type DropPlace,
+  type GapLabel,
+  type TextMode,
+} from '../lib/transform'
 
 type GuideSet = { vertical: number[]; horizontal: number[] }
+type Geom = { left?: number; top?: number; scaleX?: number; scaleY?: number; angle?: number; width?: number; height?: number; skewX?: number; skewY?: number }
 
 const NAMES: Record<Lang, Record<string, string>> = {
-  ru: { text: 'Текст', image: 'Фото', icon: 'Иконка', shape: 'Фигура', barcode: 'Штрихкод', qr: 'QR', datetime: 'Дата', line: 'Линия', number: 'Номер' },
-  en: { text: 'Text', image: 'Photo', icon: 'Icon', shape: 'Shape', barcode: 'Barcode', qr: 'QR', datetime: 'Date', line: 'Line', number: 'Number' },
+  ru: { text: 'Текст', image: 'Фото', icon: 'Иконка', shape: 'Фигура', barcode: 'Штрихкод', qr: 'QR', datetime: 'Дата', line: 'Линия', number: 'Номер', group: 'Группа' },
+  en: { text: 'Text', image: 'Photo', icon: 'Icon', shape: 'Shape', barcode: 'Barcode', qr: 'QR', datetime: 'Date', line: 'Line', number: 'Number', group: 'Group' },
 }
 
 function fabricType(obj: FabricObject) {
@@ -88,6 +102,8 @@ export class EditorEngine {
   private memory: { doc: LabelDocument; designId: string | null; dirty: boolean } | null = null
   private userPanned = false
   private guides: GuideSet = { vertical: [], horizontal: [] }
+  private measures: GapLabel[] = []
+  private altClone: Promise<void> | null = null
   private clip: Record<string, unknown>[] | null = null
   private space = false
   private panning = false
@@ -167,9 +183,15 @@ export class EditorEngine {
       selection: true,
       stopContextMenu: true,
       fireRightClick: false,
-      selectionColor: 'rgba(29,155,240,0.18)',
-      selectionBorderColor: '#1d9bf0',
+      selectionColor: 'rgba(13,153,255,0.14)',
+      selectionBorderColor: '#0d99ff',
       selectionLineWidth: 1,
+      uniformScaling: false,
+      centeredScaling: false,
+      uniScaleKey: 'shiftKey',
+      centeredKey: 'altKey',
+      selectionKey: 'shiftKey',
+      targetFindTolerance: 8,
     })
     this.canvas = canvas
     this.bind(canvas, host)
@@ -226,21 +248,36 @@ export class EditorEngine {
   }
 
   private bind(canvas: Canvas, host: HTMLElement) {
-    canvas.on('object:modified', () => {
-      this.syncTextMeta()
-      this.pushHistory()
+    canvas.on('before:transform', (opt) => {
+      const target = opt.transform?.target
+      if (!target) return
+      noteTextGesture(target)
+      const corner = opt.transform?.corner
+      if (!corner || corner === 'mtr' || corner.startsWith('rot')) return
+      if (vectorOf(target) && vectorOf(target) !== 'line') bakeVectorInPlace(target)
+    })
+    canvas.on('object:modified', () => this.finishTransform())
+    canvas.on('text:changed', (opt) => {
+      const target = opt.target
+      if (target && isText(target) && readMeta(target)?.textMode === 'auto') this.fitAutoWidth(target)
     })
     canvas.on('text:editing:exited', () => {
       this.syncTextMeta()
+      const active = this.single()
+      if (active && isText(active) && readMeta(active)?.textMode === 'auto') this.fitAutoWidth(active)
       this.pushHistory()
     })
     canvas.on('selection:created', () => this.syncSelection())
     canvas.on('selection:updated', () => this.syncSelection())
     canvas.on('selection:cleared', () => this.syncSelection())
-    canvas.on('object:moving', (opt) => this.snap(opt.e, opt.transform.target))
+    canvas.on('object:moving', (opt) => {
+      this.maybeAltDuplicate(opt.transform?.target, opt.transform?.original, opt.transform?.action, opt.e)
+      if (opt.transform?.target) this.snap(opt.e, opt.transform.target)
+    })
     canvas.on('mouse:up', () => {
       this.panning = false
       this.guides = { vertical: [], horizontal: [] }
+      this.measures = []
       this.drawGuides()
       if (this.canvas) this.canvas.selection = true
     })
@@ -355,6 +392,7 @@ export class EditorEngine {
       cornerMm: doc.cornerMm ?? defaultCornerMm(doc.widthMm, doc.heightMm),
     })
     await this.canvas.loadFromJSON(doc.canvas)
+    this.decorateAll()
     this.ensurePaper()
     this.canvas.backgroundColor = this.snapshot.workspace
     this.suspend -= 1
@@ -451,10 +489,108 @@ export class EditorEngine {
 
   private place(obj: FabricObject) {
     if (!this.canvas) return
+    this.decorate(obj)
     this.canvas.add(obj)
     this.canvas.setActiveObject(obj)
     this.canvas.requestRenderAll()
     this.pushHistory()
+  }
+
+  private decorate(obj: FabricObject) {
+    if (readMeta(obj)?.kind === 'paper') return
+    prepareObject(obj)
+    styleObject(obj)
+    const nested = obj as FabricObject & { getObjects?: () => FabricObject[] }
+    if (typeof nested.getObjects === 'function') {
+      for (const child of nested.getObjects()) this.decorate(child)
+    }
+  }
+
+  private decorateAll() {
+    if (!this.canvas) return
+    prepareScene(this.canvas.getObjects())
+    for (const obj of this.canvas.getObjects()) this.decorate(obj)
+  }
+
+  private fitAutoWidth(obj: FabricObject) {
+    if (!isText(obj)) return
+    const measured = obj.calcTextWidth()
+    obj.set({ width: Math.max(8, Math.ceil(measured) + 2), scaleX: 1, scaleY: 1 })
+    obj.initDimensions()
+    obj.setCoords()
+  }
+
+  private finishTransform() {
+    const pending = this.altClone
+    const run = () => {
+      this.normalizeModified()
+      this.syncTextMeta()
+      this.pushHistory()
+    }
+    if (pending) void pending.then(run, run)
+    else run()
+  }
+
+  private normalizeModified() {
+    const objects = this.canvas?.getActiveObjects() ?? []
+    for (const obj of objects) {
+      if (isText(obj)) {
+        this.normalizeText(obj)
+        continue
+      }
+      if (vectorOf(obj) && ((obj.scaleX ?? 1) !== 1 || (obj.scaleY ?? 1) !== 1)) bakeVectorInPlace(obj)
+    }
+  }
+
+  private normalizeText(obj: Textbox) {
+    const meta = readMeta(obj)
+    const mode: TextMode = meta?.textMode ?? 'auto-height'
+    if (mode === 'auto') {
+      this.fitAutoWidth(obj)
+      return
+    }
+    if ((obj.scaleX ?? 1) === 1 && (obj.scaleY ?? 1) === 1) return
+    const next = textResize({
+      mode,
+      width: obj.width || 1,
+      height: obj.height || 1,
+      fontSize: obj.fontSize || 16,
+      scaleX: obj.scaleX || 1,
+      scaleY: obj.scaleY || 1,
+      scaleTool: scaleToolOn(),
+    })
+    obj.set({ width: next.width, scaleX: 1, scaleY: 1, fontSize: next.fontSize })
+    if (next.mode === 'fixed') obj.set({ height: next.height })
+    obj.initDimensions()
+    if (next.mode === 'fixed') obj.set({ height: next.height })
+    if (meta && next.mode !== mode) writeMeta(obj, { ...meta, textMode: next.mode })
+    obj.setCoords()
+  }
+
+  private maybeAltDuplicate(target: FabricObject | undefined, original: { left: number; top: number } | undefined, action: string | undefined, event: Event) {
+    if (!this.canvas || !target || this.altClone) return
+    if (!('altKey' in event) || !event.altKey) return
+    if (action && action !== 'drag') return
+    if (target instanceof ActiveSelection || readMeta(target)?.kind === 'paper' || target.lockMovementX) return
+    const left = original?.left ?? target.left ?? 0
+    const top = original?.top ?? target.top ?? 0
+    const json = target.toObject(['data']) as Record<string, unknown>
+    this.altClone = this.cloneQuiet(json, left, top).finally(() => {
+      this.altClone = null
+    })
+  }
+
+  private async cloneQuiet(json: Record<string, unknown>, left: number, top: number) {
+    if (!this.canvas) return
+    const created = (await util.enlivenObjects([json])) as FabricObject[]
+    const obj = created[0]
+    if (!obj || !this.canvas) return
+    const meta = readMeta(obj)
+    obj.set({ left, top })
+    if (meta) writeMeta(obj, { ...meta, id: uid(), name: meta.name })
+    this.decorate(obj)
+    this.canvas.add(obj)
+    this.canvas.requestRenderAll()
   }
 
   addText() {
@@ -670,7 +806,11 @@ export class EditorEngine {
     if (patch.name !== undefined) meta.name = patch.name
     if (patch.fill !== undefined) obj.set('fill', patch.fill)
     if (patch.stroke !== undefined) obj.set('stroke', patch.stroke)
-    if (patch.strokeWidth !== undefined) obj.set('strokeWidth', patch.strokeWidth)
+    if (patch.strokeWidth !== undefined) {
+      meta.strokePx = patch.strokeWidth
+      obj.set('strokeWidth', patch.strokeWidth)
+    }
+    if (patch.strokeAlign !== undefined) meta.strokeAlign = patch.strokeAlign
     if (patch.angle !== undefined) obj.set('angle', patch.angle)
     if (patch.opacity !== undefined) obj.set('opacity', patch.opacity)
     if (patch.rx !== undefined && fabricType(obj) === 'rect') obj.set({ rx: patch.rx, ry: patch.rx })
@@ -681,6 +821,16 @@ export class EditorEngine {
       if (patch.fontStyle !== undefined) obj.set('fontStyle', patch.fontStyle)
       if (patch.underline !== undefined) obj.set('underline', patch.underline)
       if (patch.textAlign !== undefined) obj.set('textAlign', patch.textAlign)
+      if (patch.lineHeight !== undefined) obj.set('lineHeight', Math.max(0.5, Math.min(4, patch.lineHeight)))
+      if (patch.charSpacing !== undefined) obj.set('charSpacing', Math.max(-200, Math.min(800, patch.charSpacing)))
+      if (patch.textMode !== undefined) {
+        meta.textMode = patch.textMode
+        if (patch.textMode === 'auto') this.fitAutoWidth(obj)
+        if (patch.textMode === 'fixed') {
+          obj.initDimensions()
+          obj.set({ height: Math.max(1, obj.height || 1) })
+        }
+      }
       if (patch.text !== undefined && meta.kind !== 'number') {
         meta.sourceText = patch.text
         obj.set('text', meta.vertical ? verticalize(patch.text) : patch.text)
@@ -767,6 +917,7 @@ export class EditorEngine {
       const meta = readMeta(obj)
       obj.set({ left: (obj.left ?? 0) + offset, top: (obj.top ?? 0) + offset })
       if (meta) writeMeta(obj, { ...meta, id: uid(), name: `${meta.name}` })
+      this.decorate(obj)
       this.canvas.add(obj)
     }
     if (created.length === 1 && created[0]) this.canvas.setActiveObject(created[0])
@@ -823,19 +974,69 @@ export class EditorEngine {
     this.pushHistory()
   }
 
-  moveLayer(id: string, targetId: string) {
+  moveLayer(id: string, targetId: string, place: DropPlace = 'before') {
     if (!this.canvas || !this.paper || id === targetId) return
-    const objects = this.userObjects()
-    const moving = objects.find((obj) => readMeta(obj)?.id === id)
-    const target = objects.find((obj) => readMeta(obj)?.id === targetId)
+    const moving = this.findObject(id)
+    const target = this.findObject(targetId)
     if (!moving || !target) return
-    const next = objects.filter((obj) => obj !== moving)
-    const at = next.indexOf(target)
-    if (at < 0) return
-    next.splice(at, 0, moving)
-    next.forEach((obj, index) => this.canvas?.moveObjectTo(obj, index + 1))
+    const selected = this.canvas.getActiveObjects().map((obj) => readMeta(obj)?.id).filter((item): item is string => !!item)
+    const saved = this.snapshotGeometry()
+    this.canvas.discardActiveObject()
+    const nesting = place === 'into' && readMeta(target)?.kind === 'group' && target instanceof Group
+    if (nesting) this.nestInto(moving, target)
+    else {
+      const parent = this.realParent(moving)
+      const targetParent = this.realParent(target)
+      const slot = place === 'after' ? 'after' : 'before'
+      if (parent && parent === targetParent) this.reorderWithin(parent, id, targetId, slot)
+      else this.reorderRoot(id, readMeta(this.rootOf(target))?.id ?? targetId, slot)
+    }
+    if (!nesting) this.restoreGeometry(saved)
     if (this.canvas.getObjects().indexOf(this.paper) !== 0) this.canvas.sendObjectToBack(this.paper)
+    this.reselect(selected)
     this.canvas.requestRenderAll()
+    this.pushHistory()
+  }
+
+  groupSelected() {
+    if (!this.canvas) return
+    const active = this.canvas.getActiveObject()
+    if (!(active instanceof ActiveSelection)) return
+    const objects = active.getObjects().filter((obj) => readMeta(obj)?.kind !== 'paper' && !obj.lockMovementX)
+    if (objects.length < 2) return
+    active.removeAll()
+    this.canvas.discardActiveObject()
+    this.canvas.remove(...objects)
+    const group = new Group(objects, { subTargetCheck: true, interactive: true })
+    writeMeta(group, { id: uid(), kind: 'group', name: this.named('group') })
+    this.decorate(group)
+    this.canvas.add(group)
+    this.canvas.setActiveObject(group)
+    this.canvas.requestRenderAll()
+    this.pushHistory()
+  }
+
+  ungroupSelected() {
+    const obj = this.single()
+    if (!this.canvas || !(obj instanceof Group) || readMeta(obj)?.kind !== 'group') return
+    const children = obj.removeAll()
+    this.canvas.remove(obj)
+    for (const child of children) {
+      this.decorate(child)
+      this.canvas.add(child)
+    }
+    if (children.length === 1 && children[0]) this.canvas.setActiveObject(children[0])
+    else if (children.length > 1) this.canvas.setActiveObject(new ActiveSelection(children, { canvas: this.canvas }))
+    this.canvas.requestRenderAll()
+    this.pushHistory()
+  }
+
+  renameLayer(id: string, name: string) {
+    const obj = this.findObject(id)
+    const meta = obj ? readMeta(obj) : undefined
+    if (!obj || !meta) return
+    writeMeta(obj, { ...meta, name })
+    this.canvas?.requestRenderAll()
     this.pushHistory()
   }
 
@@ -922,17 +1123,23 @@ export class EditorEngine {
     this.pushHistory()
   }
 
-  select(id: string) {
-    const obj = this.userObjects().find((item) => readMeta(item)?.id === id)
+  select(id: string, toggle = false) {
+    const obj = this.findObject(id)
     if (!this.canvas) return
-    if (obj) this.canvas.setActiveObject(obj)
-    else this.canvas.discardActiveObject()
+    if (!obj) this.canvas.discardActiveObject()
+    else if (toggle) {
+      const current = this.canvas.getActiveObjects().filter((item) => readMeta(item)?.kind !== 'paper')
+      const next = current.includes(obj) ? current.filter((item) => item !== obj) : [...current, obj]
+      if (next.length === 0) this.canvas.discardActiveObject()
+      else if (next.length === 1 && next[0]) this.canvas.setActiveObject(next[0])
+      else this.canvas.setActiveObject(new ActiveSelection(next, { canvas: this.canvas }))
+    } else this.canvas.setActiveObject(obj)
     this.canvas.requestRenderAll()
     this.syncSelection()
   }
 
   toggleLock(id: string) {
-    const obj = this.userObjects().find((item) => readMeta(item)?.id === id)
+    const obj = this.findObject(id)
     if (!obj) return
     const locked = !obj.lockMovementX
     obj.set({
@@ -942,6 +1149,8 @@ export class EditorEngine {
       lockScalingY: locked,
       lockRotation: locked,
       hasControls: !locked,
+      selectable: !locked,
+      evented: obj.visible !== false && !locked,
     })
     this.canvas?.requestRenderAll()
     this.syncSelection()
@@ -949,20 +1158,22 @@ export class EditorEngine {
   }
 
   toggleVisible(id: string) {
-    const obj = this.userObjects().find((item) => readMeta(item)?.id === id)
+    const obj = this.findObject(id)
     if (!obj) return
-    obj.set('visible', obj.visible === false)
+    const visible = obj.visible === false
+    obj.set({ visible, evented: visible && !obj.lockMovementX })
     this.canvas?.requestRenderAll()
     this.syncSelection()
     this.pushHistory()
   }
 
-  nudge(dx: number, dy: number) {
+  nudge(dx: number, dy: number, fast = false) {
     if (!this.canvas) return
+    const step = nudgeStepPx(fast, this.snapshot.dpi)
     const objects = this.canvas.getActiveObjects().filter((obj) => readMeta(obj)?.kind !== 'paper' && !obj.lockMovementX)
     if (objects.length === 0) return
     for (const obj of objects) {
-      obj.set({ left: (obj.left ?? 0) + dx, top: (obj.top ?? 0) + dy })
+      obj.set({ left: (obj.left ?? 0) + dx * step, top: (obj.top ?? 0) + dy * step })
       obj.setCoords()
     }
     this.canvas.requestRenderAll()
@@ -989,13 +1200,34 @@ export class EditorEngine {
       w: patch.wMm !== undefined && Number.isFinite(patch.wMm) ? Math.max(1, mmToPx(Math.max(0.2, patch.wMm), dpi)) : Math.max(1, current.w),
       h: patch.hMm !== undefined && Number.isFinite(patch.hMm) ? Math.max(1, mmToPx(Math.max(0.2, patch.hMm), dpi)) : Math.max(1, current.h),
     }
-    const baseW = Math.abs(obj.width || 0) > 0.01 ? Math.abs(obj.width || 1) : 1
-    const baseH = Math.abs(obj.height || 0) > 0.01 ? Math.abs(obj.height || 1) : 1
-    obj.set({
-      scaleX: ((obj.scaleX ?? 1) < 0 ? -1 : 1) * (next.w / baseW),
-      scaleY: ((obj.scaleY ?? 1) < 0 ? -1 : 1) * (next.h / baseH),
-      ...originPoint(next.x, next.y, next.w, next.h, obj.originX, obj.originY),
-    })
+    const position = originPoint(next.x, next.y, next.w, next.h, obj.originX, obj.originY)
+    const kind = vectorOf(obj)
+    if (kind && kind !== 'line') {
+      bakeVectorInPlace(obj)
+      if (kind === 'ellipse') obj.set({ rx: next.w / 2, ry: next.h / 2, scaleX: 1, scaleY: 1, ...position })
+      else {
+        const rx = kind === 'rect' ? (obj as Rect).rx : undefined
+        const ry = kind === 'rect' ? (obj as Rect).ry : undefined
+        obj.set({ width: next.w, height: next.h, scaleX: 1, scaleY: 1, ...position })
+        if (kind === 'rect') obj.set({ rx, ry })
+      }
+    } else if (isText(obj)) {
+      const meta = readMeta(obj)
+      const mode: TextMode = patch.hMm !== undefined ? 'fixed' : (meta?.textMode ?? 'auto-height')
+      obj.set({ width: next.w, scaleX: 1, scaleY: 1, fontSize: obj.fontSize, ...position })
+      if (mode === 'fixed') obj.set({ height: next.h })
+      obj.initDimensions()
+      if (mode === 'fixed') obj.set({ height: next.h })
+      if (meta && meta.textMode !== mode) writeMeta(obj, { ...meta, textMode: mode })
+    } else {
+      const baseW = Math.abs(obj.width || 0) > 0.01 ? Math.abs(obj.width || 1) : 1
+      const baseH = Math.abs(obj.height || 0) > 0.01 ? Math.abs(obj.height || 1) : 1
+      obj.set({
+        scaleX: ((obj.scaleX ?? 1) < 0 ? -1 : 1) * (next.w / baseW),
+        scaleY: ((obj.scaleY ?? 1) < 0 ? -1 : 1) * (next.h / baseH),
+        ...position,
+      })
+    }
     obj.setCoords()
     this.canvas.requestRenderAll()
     this.pushHistory()
@@ -1135,6 +1367,12 @@ export class EditorEngine {
           scaleX: (obj.scaleX ?? 1) * scale,
           scaleY: (obj.scaleY ?? 1) * scale,
         })
+        if (vectorOf(obj)) {
+          const strokeWidth = (obj.strokeWidth ?? 0) * scale
+          obj.set('strokeWidth', strokeWidth)
+          const meta = readMeta(obj)
+          if (meta?.strokePx !== undefined) writeMeta(obj, { ...meta, strokePx: meta.strokePx * scale })
+        }
         obj.setCoords()
       }
     }
@@ -1247,25 +1485,19 @@ export class EditorEngine {
     } catch {
       return
     }
-    if (this.history[this.histIndex] === json) {
+    const next = commitHistory(
+      { entries: this.history, index: this.histIndex, gesture: this.gesture, wrote: this.gestureWrote },
+      json,
+      (a, b) => a === b,
+      historyDepth(json.length),
+    )
+    this.history = next.entries
+    this.histIndex = next.index
+    this.gestureWrote = next.wrote
+    if (!next.changed) {
       this.syncSelection()
       return
     }
-    if (this.gesture && this.gestureWrote && this.histIndex >= 0) {
-      this.history[this.histIndex] = json
-      this.commit({
-        dirty: markDirty ? true : this.snapshot.dirty,
-        contentRev: this.snapshot.contentRev + 1,
-      })
-      this.syncSelection()
-      return
-    }
-    this.history = this.history.slice(0, this.histIndex + 1)
-    this.history.push(json)
-    const depth = historyDepth(json.length)
-    while (this.history.length > depth) this.history.shift()
-    this.histIndex = this.history.length - 1
-    if (this.gesture) this.gestureWrote = true
     this.commit({
       canUndo: this.histIndex > 0,
       canRedo: false,
@@ -1288,6 +1520,7 @@ export class EditorEngine {
       cornerMm: doc.cornerMm ?? defaultCornerMm(doc.widthMm, doc.heightMm),
     })
     await this.canvas.loadFromJSON(doc.canvas)
+    this.decorateAll()
     this.ensurePaper()
     this.suspend -= 1
     this.commit({
@@ -1330,19 +1563,143 @@ export class EditorEngine {
     }
   }
 
+  private layerTree() {
+    const layers: EditorState['layers'] = []
+    const visit = (obj: FabricObject, depth: number, parentId: string | null) => {
+      const meta = readMeta(obj)
+      if (!meta || meta.kind === 'paper') return
+      layers.push({
+        id: meta.id,
+        name: meta.name ?? obj.type,
+        kind: meta.kind,
+        visible: obj.visible !== false,
+        locked: !!obj.lockMovementX,
+        depth,
+        parentId,
+      })
+      if (meta.kind === 'group' && obj instanceof Group) {
+        const children = obj.getObjects()
+        for (let index = children.length - 1; index >= 0; index -= 1) {
+          const child = children[index]
+          if (child) visit(child, depth + 1, meta.id)
+        }
+      }
+    }
+    const top = this.userObjects()
+    for (let index = top.length - 1; index >= 0; index -= 1) {
+      const obj = top[index]
+      if (obj) visit(obj, 0, null)
+    }
+    return layers
+  }
+
+  private findObject(id: string): FabricObject | undefined {
+    const walk = (objects: FabricObject[]): FabricObject | undefined => {
+      for (const obj of objects) {
+        if (readMeta(obj)?.id === id) return obj
+        if (obj instanceof Group && !(obj instanceof ActiveSelection)) {
+          const found = walk(obj.getObjects())
+          if (found) return found
+        }
+      }
+      return undefined
+    }
+    return walk(this.canvas?.getObjects() ?? [])
+  }
+
+  private realParent(obj: FabricObject): Group | null {
+    const parent = obj.parent
+    if (parent instanceof Group && !(parent instanceof ActiveSelection) && readMeta(parent)?.kind === 'group') return parent
+    return null
+  }
+
+  private rootOf(obj: FabricObject): FabricObject {
+    let current = obj
+    let parent = this.realParent(current)
+    while (parent) {
+      current = parent
+      parent = this.realParent(current)
+    }
+    return current
+  }
+
+  private reorderRoot(movingId: string, overId: string, place: 'before' | 'after') {
+    const objects = this.userObjects()
+    const frontToBack = [...objects].reverse().map((obj) => readMeta(obj)?.id ?? '').filter(Boolean)
+    const next = reorderFrontToBack(frontToBack, movingId, overId, place)
+    ;[...next].reverse().forEach((id, index) => {
+      const obj = objects.find((item) => readMeta(item)?.id === id)
+      if (obj) this.canvas?.moveObjectTo(obj, index + 1)
+    })
+  }
+
+  private reorderWithin(group: Group, movingId: string, overId: string, place: 'before' | 'after') {
+    const objects = group.getObjects()
+    const frontToBack = [...objects].reverse().map((obj) => readMeta(obj)?.id ?? '').filter(Boolean)
+    const next = reorderFrontToBack(frontToBack, movingId, overId, place)
+    ;[...next].reverse().forEach((id, index) => {
+      const obj = objects.find((item) => readMeta(item)?.id === id)
+      if (obj) group.moveObjectTo(obj, index)
+    })
+  }
+
+  private nestInto(obj: FabricObject, group: Group) {
+    if (obj === group || readMeta(obj)?.kind === 'group') return
+    const parent = this.realParent(obj)
+    if (parent) parent.remove(obj)
+    else this.canvas?.remove(obj)
+    group.add(obj)
+    this.decorate(obj)
+  }
+
+  private snapshotGeometry() {
+    const saved = new Map<string, Geom>()
+    const visit = (obj: FabricObject) => {
+      const id = readMeta(obj)?.id
+      if (id) {
+        saved.set(id, {
+          left: obj.left,
+          top: obj.top,
+          scaleX: obj.scaleX,
+          scaleY: obj.scaleY,
+          angle: obj.angle,
+          width: obj.width,
+          height: obj.height,
+          skewX: obj.skewX,
+          skewY: obj.skewY,
+        })
+      }
+      if (obj instanceof Group && !(obj instanceof ActiveSelection)) obj.getObjects().forEach(visit)
+    }
+    this.canvas?.getObjects().forEach(visit)
+    return saved
+  }
+
+  private restoreGeometry(saved: Map<string, Geom>) {
+    const visit = (obj: FabricObject) => {
+      const id = readMeta(obj)?.id
+      const geom = id ? saved.get(id) : undefined
+      if (geom) {
+        obj.set(geom)
+        obj.setCoords()
+      }
+      if (obj instanceof Group && !(obj instanceof ActiveSelection)) obj.getObjects().forEach(visit)
+    }
+    this.canvas?.getObjects().forEach(visit)
+  }
+
+  private reselect(ids: string[]) {
+    if (!this.canvas) return
+    const objects = ids.map((id) => this.findObject(id)).filter((obj): obj is FabricObject => !!obj)
+    if (objects.length === 0) return
+    if (objects.length === 1 && objects[0]) this.canvas.setActiveObject(objects[0])
+    else this.canvas.setActiveObject(new ActiveSelection(objects, { canvas: this.canvas }))
+  }
+
   private syncSelection() {
     if (!this.canvas) return
     const active = this.canvas.getActiveObjects().filter((obj) => readMeta(obj)?.kind !== 'paper')
-    const layers = [...this.userObjects()].reverse().map((obj) => {
-      const meta = readMeta(obj)
-      return {
-        id: meta?.id ?? '',
-        name: meta?.name ?? obj.type,
-        kind: meta?.kind ?? 'shape',
-        visible: obj.visible !== false,
-        locked: !!obj.lockMovementX,
-      }
-    })
+    const layers = this.layerTree()
     const only = active.length === 1 ? active[0] : undefined
     const frame = only
       ? boxToMm(
@@ -1363,6 +1720,7 @@ export class EditorEngine {
       layers,
       selected: only ? { ...describe(only), frame } : null,
       selectedId: only ? (readMeta(only)?.id ?? null) : null,
+      selectedIds: active.map((obj) => readMeta(obj)?.id ?? '').filter(Boolean),
       multi: active.length > 1 ? active.length : 0,
     })
   }
@@ -1374,67 +1732,43 @@ export class EditorEngine {
 
   private snap(event: Event, target: FabricObject) {
     if (!this.canvas || readMeta(target)?.kind === 'paper') return
-    if ('altKey' in event && event.altKey) {
+    if ('ctrlKey' in event && event.ctrlKey) {
       this.guides = { vertical: [], horizontal: [] }
+      this.measures = []
       this.drawGuides()
       return
     }
     const zoom = this.canvas.getZoom() || 1
-    const thresh = 6 / zoom
     const bounds = target.getBoundingRect()
-    const xs = [0, this.pxW / 2, this.pxW]
-    const ys = [0, this.pxH / 2, this.pxH]
+    const box = { x: bounds.left, y: bounds.top, w: bounds.width, h: bounds.height }
+    const guidesX = [0, this.pxW / 2, this.pxW]
+    const guidesY = [0, this.pxH / 2, this.pxH]
     if (this.snapshot.snapGrid) {
-      xs.push(...gridStops(this.pxW, this.snapshot.widthMm, this.snapshot.gridStep))
-      ys.push(...gridStops(this.pxH, this.snapshot.heightMm, this.snapshot.gridStep))
+      guidesX.push(...gridStops(this.pxW, this.snapshot.widthMm, this.snapshot.gridStep))
+      guidesY.push(...gridStops(this.pxH, this.snapshot.heightMm, this.snapshot.gridStep))
     }
+    const others = [{ x: 0, y: 0, w: this.pxW, h: this.pxH }]
     for (const obj of this.canvas.getObjects()) {
-      if (obj === target || obj === this.paper || obj.group === target) continue
-      const box = obj.getBoundingRect()
-      xs.push(box.left, box.left + box.width / 2, box.left + box.width)
-      ys.push(box.top, box.top + box.height / 2, box.top + box.height)
+      if (obj === target || obj === this.paper || obj.group === target || obj.visible === false) continue
+      const rect = obj.getBoundingRect()
+      guidesX.push(rect.left, rect.left + rect.width / 2, rect.left + rect.width)
+      guidesY.push(rect.top, rect.top + rect.height / 2, rect.top + rect.height)
+      others.push({ x: rect.left, y: rect.top, w: rect.width, h: rect.height })
     }
-    const edgesX = [bounds.left, bounds.left + bounds.width / 2, bounds.left + bounds.width]
-    const edgesY = [bounds.top, bounds.top + bounds.height / 2, bounds.top + bounds.height]
-    let bestDx = 0
-    let bestDy = 0
-    let distX = thresh
-    let distY = thresh
-    let guideX: number | null = null
-    let guideY: number | null = null
-    for (const x of xs) {
-      for (const edge of edgesX) {
-        const delta = x - edge
-        if (Math.abs(delta) < distX) {
-          distX = Math.abs(delta)
-          bestDx = delta
-          guideX = x
-        }
-      }
-    }
-    for (const y of ys) {
-      for (const edge of edgesY) {
-        const delta = y - edge
-        if (Math.abs(delta) < distY) {
-          distY = Math.abs(delta)
-          bestDy = delta
-          guideY = y
-        }
-      }
-    }
-    if (distX >= thresh) {
-      bestDx = 0
-      guideX = null
-    }
-    if (distY >= thresh) {
-      bestDy = 0
-      guideY = null
-    }
-    if (bestDx || bestDy) {
-      target.set({ left: (target.left ?? 0) + bestDx, top: (target.top ?? 0) + bestDy })
+    const snapped = snapTranslation({ box, guidesX, guidesY, threshold: 6 / zoom })
+    if (snapped.dx || snapped.dy) {
+      target.set({ left: (target.left ?? 0) + snapped.dx, top: (target.top ?? 0) + snapped.dy })
       target.setCoords()
     }
-    this.guides = { vertical: guideX === null ? [] : [guideX], horizontal: guideY === null ? [] : [guideY] }
+    this.guides = {
+      vertical: snapped.guideX === null ? [] : [snapped.guideX],
+      horizontal: snapped.guideY === null ? [] : [snapped.guideY],
+    }
+    this.measures = measureGaps(
+      { x: box.x + snapped.dx, y: box.y + snapped.dy, w: box.w, h: box.h },
+      others,
+      this.snapshot.dpi,
+    )
     this.drawGuides()
   }
 
@@ -1466,6 +1800,29 @@ export class EditorEngine {
       ctx.moveTo(0, sy + 0.5)
       ctx.lineTo(width, sy + 0.5)
       ctx.stroke()
+    }
+    ctx.strokeStyle = '#e85d4c'
+    ctx.lineWidth = 1
+    ctx.font = '11px ui-sans-serif, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    for (const mark of this.measures) {
+      const x1 = mark.x1 * vpt[0] + vpt[4]
+      const y1 = mark.y1 * vpt[3] + vpt[5]
+      const x2 = mark.x2 * vpt[0] + vpt[4]
+      const y2 = mark.y2 * vpt[3] + vpt[5]
+      ctx.beginPath()
+      ctx.moveTo(x1, y1)
+      ctx.lineTo(x2, y2)
+      ctx.stroke()
+      const lx = (x1 + x2) / 2
+      const ly = (y1 + y2) / 2
+      const text = String(mark.mm)
+      const pad = ctx.measureText(text).width + 8
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(lx - pad / 2, ly - 8, pad, 16)
+      ctx.fillStyle = '#e85d4c'
+      ctx.fillText(text, lx, ly)
     }
     this.drawLabelChrome(ctx, vpt, width, height)
     ctx.restore()
@@ -1652,6 +2009,12 @@ export class EditorEngine {
     if (action.type === 'undo') this.undo()
     else if (action.type === 'redo') this.redo()
     else if (action.type === 'duplicate') void this.duplicate()
+    else if (action.type === 'group') this.groupSelected()
+    else if (action.type === 'ungroup') this.ungroupSelected()
+    else if (action.type === 'scale') {
+      setScaleTool(!scaleToolOn())
+      this.commit({ scaleTool: scaleToolOn() })
+    }
     else if (action.type === 'copy') this.copy()
     else if (action.type === 'selectAll') {
       const objects = this.userObjects().filter((obj) => obj.visible !== false)
@@ -1667,7 +2030,7 @@ export class EditorEngine {
       this.canvas.discardActiveObject()
       this.canvas.requestRenderAll()
       this.syncSelection()
-    } else if (action.type === 'nudge') this.nudge(action.dx, action.dy)
+    } else if (action.type === 'nudge') this.nudge(action.dx, action.dy, action.fast)
   }
 
   private pasteEvent(event: ClipboardEvent) {
@@ -1693,7 +2056,8 @@ function describe(obj: FabricObject): SelectedInfo {
     name: meta?.name ?? obj.type,
     fill: colorOf(obj.fill),
     stroke: colorOf(obj.stroke),
-    strokeWidth: obj.strokeWidth ?? 0,
+    strokeWidth: meta?.strokePx ?? obj.strokeWidth ?? 0,
+    strokeAlign: meta?.strokeAlign ?? 'center',
     angle: Math.round(obj.angle ?? 0),
     opacity: obj.opacity ?? 1,
     brightness: meta?.brightness ?? 0,
@@ -1720,6 +2084,9 @@ function describe(obj: FabricObject): SelectedInfo {
     info.fontStyle = obj.fontStyle
     info.underline = !!obj.underline
     info.textAlign = obj.textAlign
+    info.lineHeight = obj.lineHeight
+    info.charSpacing = obj.charSpacing
+    info.textMode = meta?.textMode ?? 'auto-height'
   }
   return info
 }
