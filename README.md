@@ -17,11 +17,7 @@ Design a label in the browser the way you would in Figma: select a block, drag i
 - A compact design panel: X, Y, W, H and rotation in millimetres, with labels you can drag to scrub the value. Fill and stroke sit in their own sections.
 - A layers panel with drag-and-drop reorder (z-order only), a drop indicator, nested groups, rename on double-click, and visibility and lock toggles that stay in sync with the canvas.
 - Light, dim, and dark themes. Panel, menu, and layer motion respects `prefers-reduced-motion`.
-- Niimbot sizes, photos, icons, barcodes, QR codes, dates, and series data. QR and barcodes stay ordinary objects in the transform and in the layers list.
-
-![Editor on a desktop, with a selected shape and the design panel](docs/editor-desktop.png)
-
-![The same label on a 390px-wide screen](docs/editor-mobile.png)
+- Niimbot sizes, photos, icons, barcodes, QR codes, dates, and series data. QR and barcodes are vector objects: resizing calls `setBox` so the modules redraw into the new box.
 
 ## Credits
 
