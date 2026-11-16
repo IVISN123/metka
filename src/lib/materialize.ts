@@ -12,12 +12,21 @@ function asMeta(value: unknown): Meta | undefined {
   return meta
 }
 
+function visitObjects(objects: unknown, visit: (obj: JsonObject) => void) {
+  if (!Array.isArray(objects)) return
+  for (const item of objects) {
+    if (!item || typeof item !== 'object') continue
+    const obj = item as JsonObject
+    visit(obj)
+    if (Array.isArray(obj.objects)) visitObjects(obj.objects, visit)
+  }
+}
+
 export function applySeriesValue(doc: LabelDocument, id: string, value: string): LabelDocument {
   const clone = structuredClone(doc)
-  const objects = Array.isArray(clone.canvas.objects) ? (clone.canvas.objects as JsonObject[]) : []
-  for (const obj of objects) {
+  visitObjects(clone.canvas.objects, (obj) => {
     const meta = asMeta(obj.data)
-    if (!meta || meta.id !== id) continue
+    if (!meta || meta.id !== id) return
     if (meta.kind === 'text' || meta.kind === 'datetime') {
       meta.sourceText = value
       obj.text = meta.vertical ? verticalize(value) : value
@@ -26,7 +35,7 @@ export function applySeriesValue(doc: LabelDocument, id: string, value: string):
       meta.value = value
       obj.data = meta
     }
-  }
+  })
   return clone
 }
 
@@ -37,11 +46,10 @@ export async function materialize(
   pageNumber?: number,
 ): Promise<LabelDocument> {
   const clone = structuredClone(doc)
-  const canvas = clone.canvas
-  const objects = Array.isArray(canvas.objects) ? (canvas.objects as JsonObject[]) : []
-  for (const obj of objects) {
+  const jobs: (() => Promise<void> | void)[] = []
+  visitObjects(clone.canvas.objects, (obj) => {
     const meta = asMeta(obj.data)
-    if (!meta) continue
+    if (!meta) return
     if (meta.kind === 'text') {
       const raw = fillTemplate(meta.sourceText ?? String(obj.text ?? ''), row)
       obj.text = meta.vertical ? verticalize(raw) : raw
@@ -54,19 +62,16 @@ export async function materialize(
       obj.text = meta.vertical ? verticalize(raw) : raw
     } else if (meta.kind === 'qr') {
       const value = fillTemplate(meta.value ?? '', row)
-      try {
+      jobs.push(async () => {
         obj.src = await qrDataUrl(value, meta.ecl ?? 'M')
-      } catch {
-        /* keep the previous image */
-      }
+      })
     } else if (meta.kind === 'barcode') {
       const value = fillTemplate(meta.value ?? '', row)
-      try {
+      jobs.push(() => {
         obj.src = barcodeDataUrl(value, meta.symbology ?? 'CODE128', meta.showText !== false)
-      } catch {
-        /* keep the previous image */
-      }
+      })
     }
-  }
+  })
+  for (const job of jobs) await job()
   return clone
 }

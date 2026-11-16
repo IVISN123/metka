@@ -1,4 +1,5 @@
 import { PrintError, PrinterErrorCode } from '@mmote/niimbluelib'
+import { translate, type I18nKey } from '../i18n'
 import type { Lang } from '../types'
 
 const messages: Record<number, Record<Lang, string>> = {
@@ -167,7 +168,26 @@ function reasonOf(error: unknown): number | undefined {
   return match ? Number(match[1]) : undefined
 }
 
+const LINK_KEYS: Record<string, I18nKey> = {
+  cancelled: 'userCancelled',
+  linkLost: 'linkLost',
+  bluetoothMissing: 'bluetoothMissing',
+  serialMissing: 'serialMissing',
+  insecure: 'insecure',
+  notConnected: 'notConnected',
+  printFail: 'printFail',
+  quota: 'quota',
+}
+
+export function linkErrorText(error: string, lang: Lang): string {
+  const key = LINK_KEYS[error]
+  if (key) return translate(lang, key)
+  return formatPrintError(new Error(error), lang)
+}
+
 export function formatPrintError(error: unknown, lang: Lang): string {
+  const transport = transportText(error, lang)
+  if (transport) return transport
   const code = reasonOf(error)
   const known = code !== undefined ? messages[code]?.[lang] : undefined
   if (known) return known
@@ -177,4 +197,24 @@ export function formatPrintError(error: unknown, lang: Lang): string {
     return name ? `Печать не выполнена: ошибка ${code} (${name}). ${raw}` : `Печать не выполнена: ${raw}`
   }
   return name ? `Print failed: error ${code} (${name}). ${raw}` : `Print failed: ${raw}`
+}
+
+function transportText(error: unknown, lang: Lang): string | undefined {
+  const name = error && typeof error === 'object' && 'name' in error ? String((error as { name: unknown }).name) : ''
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
+  const blob = `${name} ${message}`
+  if (name === 'NetworkError' || /disconnect|gatt server|connection (lost|closed|failed)/i.test(blob)) {
+    return messages[PrinterErrorCode.Disconnect][lang]
+  }
+  if (name === 'SecurityError' || /secure context|secure origin|not a secure/i.test(blob)) {
+    return lang === 'ru'
+      ? 'Страница открыта не по HTTPS. Web Bluetooth и Web Serial включаются только на защищённом адресе или на localhost.'
+      : 'This page is not a secure context. Web Bluetooth and Web Serial need HTTPS or localhost.'
+  }
+  if (/requestDevice|web bluetooth|bluetooth is not available|serial port/i.test(blob) || name === 'NotSupportedError') {
+    return lang === 'ru'
+      ? 'В этом браузере нет Web Bluetooth или Web Serial. Печать работает в Chrome и Edge по HTTPS.'
+      : 'This browser has no Web Bluetooth or Web Serial. Printing works in Chrome and Edge over HTTPS.'
+  }
+  return undefined
 }
