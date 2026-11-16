@@ -22,7 +22,8 @@ import {
 import { formatPacketLine, rfidFromClient } from '../lib/diag'
 import { describeEncoded, padCanvas } from '../lib/encode'
 import { resolvePrintTask } from '../lib/presets'
-import { checkFirmware, padWidth, pageColorFor, type InkMode } from '../lib/printer-profile'
+import { runFirmwareUpgrade, type FirmwareJob, type FirmwarePort, type FlashView } from '../lib/firmware-machine'
+import { padWidth, pageColorFor, type InkMode } from '../lib/printer-profile'
 
 export type PrintJob = {
   pages: HTMLCanvasElement[]
@@ -69,6 +70,7 @@ const initial = (): PrinterSnapshot => ({
   lastPrint: '',
   error: '',
   printing: false,
+  flashing: false,
   progress: 0,
   progressLabel: '',
   progressPage: 0,
@@ -78,6 +80,8 @@ const initial = (): PrinterSnapshot => ({
 export class PrinterController {
   private client: NiimbotAbstractClient | null = null
   private snapshot: PrinterSnapshot = initial()
+  /** Stays true across the disconnect that a successful flash causes, until the run finishes. */
+  private flashLock = false
   private listeners = new Set<() => void>()
   private packetLines: string[] = []
   private printLogAt = 0
@@ -304,6 +308,7 @@ export class PrinterController {
   private parked(error = '', status: PrinterSnapshot['status'] = 'idle'): PrinterSnapshot {
     return {
       ...initial(),
+      flashing: this.flashLock,
       status,
       error,
       deviceName: this.snapshot.deviceName,
@@ -435,33 +440,105 @@ export class PrinterController {
     if (failure) throw failure
   }
 
-  async flashFirmware(data: Uint8Array, version: string, fileName: string, onProgress?: (current: number, total: number) => void) {
+  /**
+   * Flash only after `runFirmwareUpgrade` accepts the file. The library call is
+   * `protocol.firmwareUpgrade`. This method does not retry a failed transfer.
+   */
+  async flashFirmware(
+    input: { data: Uint8Array; fileName: string; version: string; allowDowngrade: boolean },
+    onUpdate?: (view: FlashView) => void,
+  ): Promise<FlashView> {
+    if (this.flashLock) {
+      const busy: FlashView = { phase: 'blocked', percent: 0, chunk: 0, chunks: 0, code: 'busy', reported: '', sent: false, awake: false }
+      onUpdate?.(busy)
+      return busy
+    }
     const client = this.client
-    if (!client?.isConnected()) throw new Error('notConnected')
-    const info = client.getPrinterInfo()
-    const verdict = checkFirmware({
-      model: client.getModelMetadata()?.model ?? this.snapshot.model,
-      hardware: info.hardwareVersion ?? this.snapshot.hardware,
-      software: info.softwareVersion ?? this.snapshot.firmware,
-      fileName,
-      version,
-    })
-    if (!verdict.ok) throw new Error(verdict.code === 'version' ? 'badVersion' : verdict.code)
-    client.stopHeartbeat()
-    const listener = (event: { currentChunk: number; totalChunks: number }) => {
-      onProgress?.(event.currentChunk, event.totalChunks)
+    const job: FirmwareJob = {
+      data: input.data,
+      fileName: input.fileName,
+      version: input.version,
+      allowDowngrade: input.allowDowngrade,
+      printer: {
+        connected: this.snapshot.status === 'connected' && client?.isConnected() === true,
+        model: client?.getModelMetadata()?.model ?? this.snapshot.model,
+        protocol: client?.getPrinterInfo().protocolVersion ?? this.snapshot.protocol,
+        hardware: client?.getPrinterInfo().hardwareVersion ?? this.snapshot.hardware,
+        software: client?.getPrinterInfo().softwareVersion ?? this.snapshot.firmware,
+        battery: this.snapshot.battery,
+        lid: this.snapshot.lid,
+        transport: this.snapshot.transport,
+        printing: this.snapshot.printing,
+        // voltageState is stored by niimbluelib and not decoded. USB is the serial transport.
+        charging: null,
+      },
     }
-    client.on('firmwareprogress', listener)
+    this.flashLock = true
+    this.patch({ flashing: true })
+    const releaseLeave = holdTab()
     try {
-      await client.protocol.firmwareUpgrade(data, version)
+      return await runFirmwareUpgrade(this.flashPort(client), job, { onUpdate })
     } finally {
-      client.off('firmwareprogress', listener)
+      releaseLeave()
+      this.flashLock = false
+      this.patch({ flashing: false })
     }
-    await this.disconnect()
+  }
+
+  private flashPort(client: NiimbotAbstractClient | null): FirmwarePort {
+    return {
+      connected: () => this.client === client && client?.isConnected() === true,
+      stopHeartbeat: () => client?.stopHeartbeat(),
+      startHeartbeat: () => {
+        if (this.client === client && client?.isConnected()) client.startHeartbeat()
+      },
+      upgrade: async (data, version, onProgress) => {
+        if (!client?.isConnected()) throw new Error('notConnected')
+        const listener = (event: { currentChunk: number; totalChunks: number }) => {
+          onProgress(event.currentChunk, event.totalChunks)
+        }
+        client.on('firmwareprogress', listener)
+        try {
+          await client.protocol.firmwareUpgrade(data, version)
+        } finally {
+          client.off('firmwareprogress', listener)
+        }
+      },
+      disconnect: () => this.disconnect(),
+      reconnect: async () => {
+        if (this.snapshot.status !== 'connected' || !this.client?.isConnected()) {
+          const ok = await this.reconnectGranted()
+          if (!ok || this.snapshot.status !== 'connected') return null
+          return { software: this.snapshot.firmware }
+        }
+        try {
+          await this.client.fetchPrinterInfo()
+        } catch {
+          /* the link is up, but this model refused a refresh */
+        }
+        const software = this.client.getPrinterInfo().softwareVersion ?? this.snapshot.firmware
+        this.patch({
+          firmware: software,
+          hardware: this.client.getPrinterInfo().hardwareVersion ?? this.snapshot.hardware,
+        })
+        return { software }
+      },
+    }
   }
 }
 
 export const printer = new PrinterController()
+
+/** The tab must stay open for the whole transfer, including the reboot wait. */
+function holdTab(): () => void {
+  if (typeof window === 'undefined') return () => undefined
+  const onLeave = (event: BeforeUnloadEvent) => {
+    event.preventDefault()
+    event.returnValue = ''
+  }
+  window.addEventListener('beforeunload', onLeave)
+  return () => window.removeEventListener('beforeunload', onLeave)
+}
 
 export function countBlack(canvas: HTMLCanvasElement, direction: PrintDirection) {
   return describeEncoded(canvas, direction)

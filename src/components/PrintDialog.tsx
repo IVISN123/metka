@@ -7,7 +7,7 @@ import { LabelCodeError } from '../lib/codes'
 import { formatPrintError, linkErrorText } from '../lib/print-errors'
 import { LABEL_TYPES, metaFor, resolvePrintTask, suggestedTask, taskNames } from '../lib/presets'
 import { renderDocumentColor, renderDocumentThermal } from '../lib/render'
-import { checkFirmware, firmwareArchive, inkChoices, labelsRemaining, pageColorFor, shownVersion, suggestionFromRfid, type InkMode } from '../lib/printer-profile'
+import { inkChoices, labelsRemaining, pageColorFor, shownVersion, suggestionFromRfid, type InkMode } from '../lib/printer-profile'
 import { PageColorType } from '@mmote/niimbluelib'
 import { browserSupport } from '../lib/browser'
 import { labelWord } from '../lib/editor-ui'
@@ -19,6 +19,7 @@ import type { I18nKey } from '../i18n'
 import type { Sharpness } from '../types'
 import { useI18n } from './state'
 import { useEngine } from './Stage'
+import { FirmwarePanel } from './FirmwarePanel'
 import { Button, CheckRow, Field, Modal, SelectInput, Slider, TextInput } from './ui'
 
 export type BatchJob = { rows: Record<string, string>[]; targetId: string | null } | null
@@ -33,12 +34,8 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
   const [advanced, setAdvanced] = useState(false)
   const [diag, setDiag] = useState(false)
   const [fwOpen, setFwOpen] = useState(false)
-  const [fwVersion, setFwVersion] = useState('')
   const [ink, setInk] = useState<InkMode>('black')
   const [reading, setReading] = useState(false)
-  const [fwName, setFwName] = useState('')
-  const [fwData, setFwData] = useState<Uint8Array | null>(null)
-  const [fwProgress, setFwProgress] = useState('')
   const pageW = mmToPx(state.widthMm, state.dpi)
   const pageH = mmToPx(state.heightMm, state.dpi)
   const hasNumber = state.layers.some((layer) => layer.kind === 'number')
@@ -59,7 +56,6 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
   const colors = inkChoices(effectiveTask)
   const suggestion = link.status === 'connected' ? suggestionFromRfid(link.rfid) : null
   const left = labelsRemaining(link.rfid.total, link.rfid.used)
-  const fwModel = (link.model && metaFor(link.model) ? link.model : state.model) || ''
   const fwHw = shownVersion(link.hardware)
   const fwSw = shownVersion(link.firmware)
   const densityMin = link.status === 'connected' && link.densityMin != null ? Math.min(link.densityMin, link.densityMax ?? link.densityMin) : (meta?.densityMin ?? 1)
@@ -151,7 +147,7 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
             {t('willPrint', { n: labelCount, word: labelWord(labelCount, lang) })}
           </p>
           {rangeError && <p className="text-xs leading-5 text-[var(--danger)]">{t('pageRangeBad')}</p>}
-          <Button variant="primary" className="w-full" disabled={link.printing || !state.ready || rangeError} onClick={() => void send()}>
+          <Button variant="primary" className="w-full" disabled={link.printing || link.flashing || !state.ready || rangeError} onClick={() => void send()}>
             {t('sendPrint')}
           </Button>
         </div>
@@ -379,125 +375,7 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
             <button type="button" className="text-left text-sm font-bold text-[var(--danger)]" onClick={() => setFwOpen((open) => !open)}>
               {t('firmwareFlash')}
             </button>
-            {fwOpen && (
-              <div className="flex flex-col gap-2 rounded-2xl border-2 border-[var(--danger)] p-3">
-                <p className="text-sm font-bold leading-5 text-[var(--danger)]">{t('flashLead', { model: modelLabel(fwModel) })}</p>
-                <p className="text-xs leading-5 text-[var(--text)]">{t('flashWarn', { hw: fwHw || '—', sw: fwSw || '—' })}</p>
-                <p className="text-xs leading-5">
-                  {t('firmware')}: {fwSw || '—'} · {t('hardware')}: {fwHw || '—'}
-                </p>
-                <p className="text-xs leading-5">
-                  <a className="font-bold text-[var(--accent)] underline" href={firmwareArchive(fwModel)} target="_blank" rel="noreferrer">
-                    {t('flashLink', { model: modelLabel(fwModel) })}
-                  </a>
-                  {fwModel === 'D11_H' && (
-                    <>
-                      {' · '}
-                      <a className="font-bold text-[var(--accent)] underline" href="https://fw.niim.blue/testing/D11_H/D11_H_4.28.bin" target="_blank" rel="noreferrer">
-                        {t('flashLinkTest')}
-                      </a>
-                    </>
-                  )}
-                </p>
-                <label className="text-xs font-bold text-[var(--muted)]">
-                  {t('flashFile')}
-                  <input
-                    type="file"
-                    accept=".bin,application/octet-stream"
-                    className="mt-1 block w-full text-sm font-bold text-[var(--text)]"
-                    onChange={(event) => {
-                      const file = event.target.files?.[0]
-                      event.target.value = ''
-                      if (!file) return
-                      void file.arrayBuffer().then((buffer) => {
-                        const bytes = new Uint8Array(buffer)
-                        setFwData(bytes)
-                        setFwName(file.name)
-                        const named = file.name.match(/(\d+\.\d+)/)
-                        if (bytes.length >= 0x1c && bytes[0] === 0x18) {
-                          const ver = ((bytes[0x15] ?? 0) << 8) + (bytes[0x14] ?? 0)
-                          setFwVersion((ver / 100).toFixed(2))
-                        } else if (named?.[1]) setFwVersion(named[1])
-                      })
-                    }}
-                  />
-                </label>
-                {fwName && <p className="truncate text-xs font-bold">{fwName}</p>}
-                <label className="text-xs font-bold text-[var(--muted)]">
-                  {t('flashVersion')}
-                  <input
-                    className="mt-1 h-11 w-full rounded-xl border-2 border-[var(--border)] bg-[var(--field)] px-3 text-base font-bold text-[var(--text)]"
-                    value={fwVersion}
-                    onChange={(event) => setFwVersion(event.target.value)}
-                  />
-                </label>
-                <Button
-                  className="!bg-[var(--danger)] !text-white"
-                  disabled={link.status !== 'connected' || link.printing || fwProgress !== ''}
-                  onClick={() => {
-                  if (!fwData) {
-                    toast(t('flashNeedFile'))
-                    return
-                  }
-                  const version = fwVersion.trim()
-                  const verdict = checkFirmware({
-                    model: fwModel,
-                    hardware: link.hardware,
-                    software: link.firmware,
-                    fileName: fwName,
-                    version,
-                  })
-                  if (!verdict.ok) {
-                    toast(
-                      verdict.code === 'version'
-                        ? t('flashBadVersion')
-                        : verdict.code === 'model'
-                          ? t('flashModel', { model: modelLabel(fwModel) })
-                          : verdict.code === 'major'
-                            ? t('flashMajor', { hw: fwHw || '—', sw: fwSw || '—' })
-                            : t('flashOlder', { ver: version, sw: fwSw || '—' }),
-                    )
-                    return
-                  }
-                  if (
-                    !window.confirm(
-                      t('flashConfirm', { model: modelLabel(fwModel), sw: fwSw || '—', ver: version }),
-                    )
-                  ) {
-                    return
-                  }
-                  setFwProgress('…')
-                  void printer
-                    .flashFirmware(fwData, version, fwName, (current, total) => setFwProgress(`${current}/${total}`))
-                      .then(() => {
-                        setFwProgress('')
-                        setFwData(null)
-                        setFwName('')
-                        toast(t('flashDone'))
-                      })
-                      .catch((error: unknown) => {
-                        setFwProgress('')
-                      const message = error instanceof Error ? error.message : String(error)
-                      toast(
-                        message === 'notConnected'
-                          ? t('notConnected')
-                          : message === 'badVersion'
-                            ? t('flashBadVersion')
-                            : message === 'model'
-                              ? t('flashModel', { model: modelLabel(fwModel) })
-                              : message === 'major'
-                                ? t('flashMajor', { hw: fwHw || '—', sw: fwSw || '—' })
-                                : message === 'downgrade'
-                                  ? t('flashOlder', { ver: fwVersion.trim(), sw: fwSw || '—' })
-                                  : message,
-                      )
-                      })
-                  }}
-                >
-                  {fwProgress ? fwProgress : t('flashBurn')}
-                </Button>
-              </div>
-            )}
+            {fwOpen && <FirmwarePanel />}
             <Button
               onClick={() => {
                 const text = [
