@@ -9,6 +9,7 @@ import {
   snapTranslation,
   strokePaint,
   textResize,
+  toggleSelection,
   zOrderPositions,
 } from './transform'
 
@@ -169,6 +170,12 @@ describe('snapping', () => {
 })
 
 describe('layers and history', () => {
+  it('shift-click adds to the selection and a plain click replaces it', () => {
+    expect(toggleSelection(['a'], 'b', true)).toEqual(['a', 'b'])
+    expect(toggleSelection(['a', 'b'], 'a', true)).toEqual(['b'])
+    expect(toggleSelection(['a', 'b'], 'c', false)).toEqual(['c'])
+  })
+
   it('reorders z-order without moving geometry', () => {
     const items = [
       { id: 'a', x: 1, y: 4 },

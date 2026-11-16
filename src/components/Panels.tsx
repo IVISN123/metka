@@ -208,7 +208,8 @@ function startLayerDrag(
   event.preventDefault()
   event.stopPropagation()
   const pointer = event.pointerId
-  event.currentTarget.setPointerCapture(pointer)
+  const handle = event.currentTarget
+  handle.setPointerCapture(pointer)
   let moved = false
   const move = (ev: PointerEvent) => {
     if (!moved && Math.abs(ev.clientY - event.clientY) < 4) return
@@ -227,7 +228,7 @@ function startLayerDrag(
   const up = () => {
     window.removeEventListener('pointermove', move)
     window.removeEventListener('pointerup', up)
-    if (event.currentTarget.hasPointerCapture?.(pointer)) event.currentTarget.releasePointerCapture(pointer)
+    if (handle.hasPointerCapture(pointer)) handle.releasePointerCapture(pointer)
     setDrop(null)
   }
   window.addEventListener('pointermove', move)
@@ -314,7 +315,15 @@ function LayerRow({
       ) : (
         <button
           type="button"
-          onClick={(event) => engine.select(layer.id, event.shiftKey)}
+          onPointerDown={(event) => {
+            if (!event.shiftKey) return
+            event.preventDefault()
+            engine.select(layer.id, true)
+          }}
+          onClick={(event) => {
+            if (event.shiftKey) return
+            engine.select(layer.id, false)
+          }}
           onDoubleClick={onEdit}
           className={`flex h-11 min-w-0 flex-1 items-center gap-2 text-left text-sm ${layer.visible ? 'text-[var(--text)]' : 'text-[var(--muted)]'}`}
         >

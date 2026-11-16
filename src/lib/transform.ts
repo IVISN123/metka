@@ -240,6 +240,12 @@ export function measureGaps(moving: Box, others: Box[], dpi: number, epsilon = 0
   return labels.slice(0, 4)
 }
 
+/** Shift-click adds or removes one id. A plain click replaces the selection. */
+export function toggleSelection(current: string[], id: string, toggle: boolean): string[] {
+  if (!toggle) return [id]
+  return current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+}
+
 /** Front-to-back id list. `before` means closer to the front (higher in the layers panel). */
 export function reorderFrontToBack(ids: string[], movingId: string, overId: string, place: Exclude<DropPlace, 'into'>): string[] {
   if (movingId === overId || !ids.includes(movingId) || !ids.includes(overId)) return ids

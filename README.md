@@ -19,6 +19,10 @@ Design a label in the browser the way you would in Figma: select a block, drag i
 - Light, dim, and dark themes. Panel, menu, and layer motion respects `prefers-reduced-motion`.
 - Niimbot sizes, photos, icons, barcodes, QR codes, dates, and series data. QR and barcodes are vector objects: resizing calls `setBox` so the modules redraw into the new box.
 
+![Desktop editor with a selected shape, millimetre fields, and stroke alignment](docs/editor-desktop.png)
+
+![390px layout with the layers sheet, including a nested group](docs/editor-mobile.png)
+
 ## Credits
 
 Printing uses [`@mmote/niimbluelib`](https://github.com/MultiMote/niimbluelib) 0.49.0, the library behind [NiimBlue](https://niim.blue/). **It has not been tested on a physical printer in this environment.** Chrome or Edge on desktop or Android, served over HTTPS (or `localhost`), is required for a real print. Safari on iPhone and iPad cannot print from this page.

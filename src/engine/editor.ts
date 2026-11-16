@@ -58,6 +58,7 @@ import {
   reorderFrontToBack,
   snapTranslation,
   textResize,
+  toggleSelection,
   type DropPlace,
   type GapLabel,
   type TextMode,
@@ -1182,16 +1183,18 @@ export class EditorEngine {
   }
 
   select(id: string, toggle = false) {
-    const obj = this.findObject(id)
     if (!this.canvas) return
-    if (!obj) this.canvas.discardActiveObject()
-    else if (toggle) {
-      const current = this.canvas.getActiveObjects().filter((item) => readMeta(item)?.kind !== 'paper')
-      const next = current.includes(obj) ? current.filter((item) => item !== obj) : [...current, obj]
-      if (next.length === 0) this.canvas.discardActiveObject()
-      else if (next.length === 1 && next[0]) this.canvas.setActiveObject(next[0])
-      else this.canvas.setActiveObject(new ActiveSelection(next, { canvas: this.canvas }))
-    } else this.canvas.setActiveObject(obj)
+    const current = this.canvas
+      .getActiveObjects()
+      .map((obj) => readMeta(obj)?.id)
+      .filter((item): item is string => !!item)
+    const ids = toggleSelection(current, id, toggle)
+    this.canvas.discardActiveObject()
+    const objects = ids
+      .map((item) => this.findObject(item))
+      .filter((obj): obj is FabricObject => !!obj && readMeta(obj)?.kind !== 'paper' && !obj.lockMovementX)
+    if (objects.length === 1 && objects[0]) this.canvas.setActiveObject(objects[0])
+    else if (objects.length > 1) this.canvas.setActiveObject(new ActiveSelection(objects, { canvas: this.canvas }))
     this.canvas.requestRenderAll()
     this.syncSelection()
   }
