@@ -333,6 +333,7 @@ export class EditorEngine {
       pageTo: state.pageTo,
       preview: state.preview,
       cornerMm: state.cornerMm,
+      ...(state.gapMm != null ? { gapMm: state.gapMm } : {}),
       canvas: this.canvas.toObject(['data']) as Record<string, unknown>,
     }
   }
@@ -377,6 +378,7 @@ export class EditorEngine {
       pageTo: doc.pageTo ?? 1,
       preview: doc.preview,
       cornerMm: doc.cornerMm ?? defaultCornerMm(doc.widthMm, doc.heightMm),
+      gapMm: doc.gapMm ?? null,
       dirty,
     })
     this.pushHistory(false)
@@ -962,6 +964,7 @@ export class EditorEngine {
       heightMm: bounded.heightMm,
       dpi: bounded.dpi,
       cornerMm: defaultCornerMm(bounded.widthMm, bounded.heightMm),
+      gapMm: null,
     })
     this.ensurePaper()
     this.pushHistory()
@@ -992,15 +995,76 @@ export class EditorEngine {
     if (!meta) return
     this.applyDpi(meta.dpi)
     const suggestion = suggestedTask(model)
+    const labelType = meta.paperTypes.includes(this.snapshot.labelType) ? this.snapshot.labelType : (meta.paperTypes[0] ?? this.snapshot.labelType)
     this.commit({
       model,
       dpi: meta.dpi,
       direction: meta.printDirection === 'left' ? 'left' : 'top',
       density: meta.densityDefault,
+      labelType,
       task: suggestion.task,
     })
     this.pushHistory()
     this.fit()
+  }
+
+  applyPrinterSettings(next: { model: string; dpi: number; direction: PrintDirection; density: number; labelType: number; task: string; taskAuto: true }) {
+    const current = this.snapshot
+    const same =
+      next.model === current.model &&
+      next.dpi === current.dpi &&
+      next.direction === current.direction &&
+      next.density === current.density &&
+      next.labelType === current.labelType &&
+      next.task === current.task &&
+      current.taskAuto
+    if (same) return
+    if (next.dpi !== current.dpi) this.applyDpi(next.dpi)
+    this.commit(next)
+    this.pushHistory()
+    if (next.dpi !== current.dpi) this.fit()
+  }
+
+  applyDetectedLabel(widthMm: number, heightMm: number, labelType: number | null, gapMm: number | null) {
+    if (!Number.isFinite(widthMm) || !Number.isFinite(heightMm)) return
+    const bounded = clampSize(widthMm, heightMm, this.snapshot.dpi)
+    if (bounded.dpi !== this.snapshot.dpi) this.applyDpi(bounded.dpi)
+    this.pxW = mmToPx(bounded.widthMm, bounded.dpi)
+    this.pxH = mmToPx(bounded.heightMm, bounded.dpi)
+    this.commit({
+      widthMm: bounded.widthMm,
+      heightMm: bounded.heightMm,
+      dpi: bounded.dpi,
+      cornerMm: defaultCornerMm(bounded.widthMm, bounded.heightMm),
+      labelType: labelType && labelType > 0 ? labelType : this.snapshot.labelType,
+      gapMm,
+    })
+    this.ensurePaper()
+    this.pushHistory()
+    this.fit()
+  }
+
+  /** Keep dpi, direction, and label type on the connected model without resetting a density the user already chose. */
+  clampToModel(model: string) {
+    const meta = metaFor(model)
+    if (!meta) return
+    const direction = meta.printDirection === 'left' ? 'left' : 'top'
+    const density = clamp(Math.round(this.snapshot.density), meta.densityMin, meta.densityMax)
+    const labelType = meta.paperTypes.includes(this.snapshot.labelType) ? this.snapshot.labelType : (meta.paperTypes[0] ?? this.snapshot.labelType)
+    const dpiChanged = this.snapshot.dpi !== meta.dpi
+    if (dpiChanged) this.applyDpi(meta.dpi)
+    if (
+      model === this.snapshot.model &&
+      !dpiChanged &&
+      direction === this.snapshot.direction &&
+      density === this.snapshot.density &&
+      labelType === this.snapshot.labelType
+    ) {
+      return
+    }
+    this.commit({ model, dpi: meta.dpi, direction, density, labelType })
+    this.pushHistory()
+    if (dpiChanged) this.fit()
   }
 
   setDpi(dpi: number) {
@@ -1195,6 +1259,7 @@ export class EditorEngine {
       pageTo: doc.pageTo ?? 1,
       preview: doc.preview,
       cornerMm: doc.cornerMm ?? defaultCornerMm(doc.widthMm, doc.heightMm),
+      gapMm: doc.gapMm ?? null,
       canUndo: this.histIndex > 0,
       canRedo: this.histIndex < this.history.length - 1,
       dirty: true,

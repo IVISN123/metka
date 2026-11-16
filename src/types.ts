@@ -54,6 +54,8 @@ export type LabelDocument = {
   pageTo?: number
   preview: PreviewSettings
   cornerMm?: number
+  /** Gap reported by the printer roll, in millimetres. The canvas is the sticker face, not the gap. */
+  gapMm?: number
   canvas: Record<string, unknown>
 }
 
@@ -135,6 +137,7 @@ export type EditorState = {
   pageFrom: number
   pageTo: number
   preview: PreviewSettings
+  gapMm: number | null
   zoom: number
   canUndo: boolean
   canRedo: boolean
@@ -157,6 +160,7 @@ export type RfidView = {
   readOk: boolean | null
   widthMm: number | null
   heightMm: number | null
+  gapMm: number | null
 }
 
 export type PrinterSnapshot = {
@@ -164,11 +168,22 @@ export type PrinterSnapshot = {
   transport: 'bluetooth' | 'serial' | null
   deviceName: string
   model: string
+  modelId: number | null
   detectedTask: string
   dpi: number | null
   printhead: number | null
+  printheadSensor: number | null
   battery: number | null
   paper: boolean | null
+  lid: boolean | null
+  temp: number | null
+  ribbon: boolean | null
+  ribbonRfid: boolean | null
+  labelTypes: number[]
+  densityMin: number | null
+  densityMax: number | null
+  supportColor: boolean | null
+  printColors: number[]
   firmware: string
   hardware: string
   protocol: number | null
@@ -193,6 +208,7 @@ export const emptyRfid = (): RfidView => ({
   readOk: null,
   widthMm: null,
   heightMm: null,
+  gapMm: null,
 })
 
 export const initialEditorState = (): EditorState => ({
@@ -214,6 +230,7 @@ export const initialEditorState = (): EditorState => ({
   pageFrom: 1,
   pageTo: 1,
   preview: { mode: 'floyd', threshold: 168, invert: false, sharpness: 'off' },
+  gapMm: null,
   zoom: 1,
   canUndo: false,
   canRedo: false,

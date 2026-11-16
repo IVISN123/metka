@@ -39,13 +39,17 @@ export const PRESETS: Preset[] = [
   { id: '14x50', title: '14×50', widthMm: 50, heightMm: 14, note: { ru: 'лента 14 мм', en: '14 mm tape' } },
   { id: '15x30', title: '15×30', widthMm: 30, heightMm: 15, note: { ru: 'лента 15 мм', en: '15 mm tape' } },
   { id: '15x50', title: '15×50', widthMm: 50, heightMm: 15, note: { ru: 'лента 15 мм', en: '15 mm tape' } },
+  { id: '20x10', title: '20×10', widthMm: 20, heightMm: 10, note: { ru: 'B21 Pro', en: 'B21 Pro' } },
   { id: '25x15', title: '25×15', widthMm: 25, heightMm: 15, note: { ru: 'прямоугольная', en: 'rectangle' } },
   { id: '30x15', title: '30×15', widthMm: 30, heightMm: 15, note: { ru: 'прямоугольная', en: 'rectangle' } },
   { id: '30x20', title: '30×20', widthMm: 30, heightMm: 20, note: { ru: 'прямоугольная', en: 'rectangle' } },
+  { id: '40x20', title: '40×20', widthMm: 40, heightMm: 20, note: { ru: 'B21 Pro', en: 'B21 Pro' } },
   { id: '40x30', title: '40×30', widthMm: 40, heightMm: 30, note: { ru: 'прямоугольная', en: 'rectangle' } },
   { id: '40x60', title: '40×60', widthMm: 40, heightMm: 60, note: { ru: 'прямоугольная', en: 'rectangle' } },
   { id: '50x20', title: '50×20', widthMm: 50, heightMm: 20, note: { ru: 'прямоугольная', en: 'rectangle' } },
-  { id: '50x30', title: '50×30', widthMm: 50, heightMm: 30, note: { ru: 'прямоугольная', en: 'rectangle' } },
+  { id: '50x30', title: '50×30', widthMm: 50, heightMm: 30, note: { ru: 'рулон с зазором', en: 'gapped roll' } },
+  { id: '50x40', title: '50×40', widthMm: 50, heightMm: 40, note: { ru: 'B21 Pro', en: 'B21 Pro' } },
+  { id: '50x50', title: '50×50', widthMm: 50, heightMm: 50, note: { ru: 'B21 Pro', en: 'B21 Pro' } },
   { id: '50x70', title: '50×70', widthMm: 50, heightMm: 70, note: { ru: 'прямоугольная', en: 'rectangle' } },
   { id: '50x80', title: '50×80', widthMm: 50, heightMm: 80, note: { ru: 'прямоугольная', en: 'rectangle' } },
   { id: '60x40', title: '60×40', widthMm: 60, heightMm: 40, note: { ru: 'прямоугольная', en: 'rectangle' } },
@@ -83,6 +87,7 @@ export function resolvePrintTask(input: {
     const found = findPrintTask(meta.model, version)
     if (found && isPrintTask(found)) return found
   }
+  if (version && version >= 4) return 'D110M_V4'
   if (isPrintTask(input.manual)) return input.manual
   return suggestedTask(input.model ?? '').task
 }
@@ -112,6 +117,30 @@ export function directionOf(modelId: string): PrintDirection {
 
 export function matchingPreset(widthMm: number, heightMm: number): Preset | undefined {
   return PRESETS.find((preset) => preset.widthMm === widthMm && preset.heightMm === heightMm)
+}
+
+const B21_PRO_PRESET_IDS = new Set([
+  '20x10',
+  '25x15',
+  '30x20',
+  '40x20',
+  '40x30',
+  '40x60',
+  '50x20',
+  '50x30',
+  '50x40',
+  '50x50',
+  '50x70',
+  '50x80',
+])
+
+/** B21 Pro gets its common rolls first. Other models keep the single list. */
+export function presetSections(modelId: string): { id: 'b21' | 'rest'; items: Preset[] }[] {
+  if (modelId !== 'B21_PRO') return [{ id: 'rest', items: PRESETS }]
+  return [
+    { id: 'b21', items: PRESETS.filter((preset) => B21_PRO_PRESET_IDS.has(preset.id)) },
+    { id: 'rest', items: PRESETS.filter((preset) => !B21_PRO_PRESET_IDS.has(preset.id)) },
+  ]
 }
 
 const fileFont = (id: string, label: string, generic: 'sans-serif' | 'serif' | 'monospace') => ({

@@ -70,6 +70,8 @@ export function normalizeDocument(
   const pageTo = optionalNumber(raw, 'pageTo')
   if (pageFrom !== null && 'pageFrom' in raw) doc.pageFrom = Math.round(pageFrom)
   if (pageTo !== null && 'pageTo' in raw) doc.pageTo = Math.round(pageTo)
+  const gap = optionalNumber(raw, 'gapMm')
+  if (gap !== null && gap >= 0 && gap <= 50) doc.gapMm = Math.round(gap * 10) / 10
   return { ok: true, doc }
 }
 

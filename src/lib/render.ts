@@ -27,10 +27,17 @@ async function loadScene(doc: LabelDocument, width: number, height: number, back
   return canvas
 }
 
-export async function renderDocumentColor(doc: LabelDocument): Promise<HTMLCanvasElement> {
-  const width = mmToPx(doc.widthMm, doc.dpi)
-  const height = mmToPx(doc.heightMm, doc.dpi)
-  const canvas = await loadScene(doc, width, height, '#ffffff')
+export async function renderDocumentColor(
+  doc: LabelDocument,
+  row?: Record<string, string>,
+  now?: Date,
+  pageNumber?: number,
+): Promise<HTMLCanvasElement> {
+  if (now || row || pageNumber !== undefined) await ensureFontsReady()
+  const prepared = now || row || pageNumber !== undefined ? await materialize(doc, row, now ?? new Date(), pageNumber) : doc
+  const width = mmToPx(prepared.widthMm, prepared.dpi)
+  const height = mmToPx(prepared.heightMm, prepared.dpi)
+  const canvas = await loadScene(prepared, width, height, '#ffffff')
   try {
     canvas.renderAll()
     return canvas.toCanvasElement(1, { left: 0, top: 0, width, height })
@@ -106,7 +113,7 @@ function stampImage(ctx: CanvasRenderingContext2D, obj: FabricObject, mode: Dith
   mctx.drawImage(binary, 0, 0)
   mctx.globalCompositeOperation = 'destination-in'
   mctx.drawImage(element, 0, 0)
-  ctx.drawImage(masked, left, top, width, height)
+  blitNearest(ctx, masked, left, top, width, height)
 }
 
 function stampLine(ctx: CanvasRenderingContext2D, obj: FabricObject, threshold: number, sharpness: Sharpness) {
@@ -133,7 +140,25 @@ function stampLine(ctx: CanvasRenderingContext2D, obj: FabricObject, threshold: 
   tmp.width = element.width
   tmp.height = element.height
   tmp.getContext('2d')?.putImageData(out, 0, 0)
-  ctx.drawImage(tmp, left, top, width, height)
+  blitNearest(ctx, tmp, left, top, width, height)
+}
+
+/** 1-bit dots stay on whole pixels. Smoothing here turns a 300 dpi edge back into gray. */
+function blitNearest(
+  ctx: CanvasRenderingContext2D,
+  source: HTMLCanvasElement,
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+) {
+  ctx.imageSmoothingEnabled = false
+  const x = Math.round(left)
+  const y = Math.round(top)
+  const w = Math.max(1, Math.round(width))
+  const h = Math.max(1, Math.round(height))
+  if (source.width === w && source.height === h) ctx.drawImage(source, x, y)
+  else ctx.drawImage(source, x, y, w, h)
 }
 
 function coveredLuma(data: Uint8ClampedArray, pixel: number) {
