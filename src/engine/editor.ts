@@ -19,8 +19,11 @@ import type { AlignMode, DitherChoice, EditorState, LabelDocument, Lang, Preview
 import { initialEditorState } from '../types'
 import { buildBuiltin } from './builtins'
 import { readMeta, writeMeta } from './meta'
+import { translate } from '../i18n'
+import { normalizeDocument } from '../lib/bundle'
 import { barcodeDataUrl, qrDataUrl } from '../lib/codes'
 import { iconById, symbolSvg } from '../lib/icons'
+import { MAX_PHOTO_BYTES, MAX_PHOTO_EDGE, historyDepth, targetPhotoSize } from '../lib/limits'
 import { formatPageLabel, parsePageRange } from '../lib/pages'
 import { metaFor, suggestedTask } from '../lib/presets'
 import { ensureFontsReady } from '../lib/fonts'
@@ -40,7 +43,8 @@ import {
   type AlignEdge,
   type AxisBox,
 } from '../lib/editor-ui'
-import { clamp, formatDate, mmToPx, uid, verticalize } from '../lib/units'
+import { toast } from '../toast'
+import { clamp, clampCopies, clampDpi, clampSize, formatDate, mmToPx, uid, verticalize } from '../lib/units'
 
 type GuideSet = { vertical: number[]; horizontal: number[] }
 
@@ -194,7 +198,7 @@ export class EditorEngine {
 
   private async restore(token: number) {
     if (!this.didInitial) {
-      let saved: { doc: LabelDocument; designId: string | null } | null = null
+      let saved: Awaited<ReturnType<typeof readAutosave>> = null
       try {
         saved = await readAutosave()
       } catch {
@@ -203,8 +207,13 @@ export class EditorEngine {
       if (token !== this.loadToken || !this.canvas) return
       await ensureFontsReady()
       if (token !== this.loadToken || !this.canvas) return
-      if (saved?.doc) await this.loadDocument(saved.doc, saved.designId, false)
-      else await this.loadDocument(await buildBuiltin('drone-strip'), null, false)
+      try {
+        if (saved?.doc) await this.loadDocument(saved.doc, saved.designId, saved.dirty)
+        else await this.loadDocument(await buildBuiltin('drone-strip'), null, false)
+      } catch {
+        if (token !== this.loadToken || !this.canvas) return
+        await this.loadDocument(await buildBuiltin('drone-strip'), null, false)
+      }
       if (token !== this.loadToken) return
       this.didInitial = true
       return
@@ -329,6 +338,9 @@ export class EditorEngine {
   }
 
   async loadDocument(doc: LabelDocument, designId: string | null, dirty: boolean) {
+    const normalized = normalizeDocument(doc, { clamp: true, maxImageChars: null })
+    if (!normalized.ok) throw new Error('importFail')
+    doc = normalized.doc
     if (!this.canvas) return
     this.suspend += 1
     this.pxW = mmToPx(doc.widthMm, doc.dpi)
@@ -494,8 +506,18 @@ export class EditorEngine {
   }
 
   async addImageFile(file: File) {
-    const url = await readDataUrl(file)
-    const image = await FabricImage.fromURL(url)
+    if (file.size > MAX_PHOTO_BYTES) {
+      toast(translate(this.lang, 'photoTooBig'))
+      return
+    }
+    let image: FabricImage
+    try {
+      const url = await shrinkDataUrl(await readDataUrl(file), MAX_PHOTO_EDGE)
+      image = await FabricImage.fromURL(url)
+    } catch {
+      toast(translate(this.lang, 'photoFail'))
+      return
+    }
     const scale = Math.min(this.pxW * 0.7 / (image.width || 1), this.pxH * 0.9 / (image.height || 1), 4)
     const center = this.viewCenter()
     image.set({
@@ -630,6 +652,17 @@ export class EditorEngine {
     const obj = this.single()
     if (!obj) return
     const meta = { ...(readMeta(obj) ?? { id: uid(), kind: 'shape' as const, name: '' }) }
+    const nextValue = patch.value !== undefined ? patch.value : meta.value
+    const nextSym = patch.symbology !== undefined ? patch.symbology : meta.symbology
+    const nextShow = patch.showText !== undefined ? patch.showText : meta.showText
+    const nextEcl = patch.ecl !== undefined ? patch.ecl : meta.ecl
+    let raster: string | null = null
+    if (meta.kind === 'barcode' && (patch.value !== undefined || patch.symbology !== undefined || patch.showText !== undefined)) {
+      raster = barcodeDataUrl(nextValue || '0', nextSym || 'CODE128', nextShow !== false)
+    }
+    if (meta.kind === 'qr' && (patch.value !== undefined || patch.ecl !== undefined)) {
+      raster = await qrDataUrl(nextValue || ' ', nextEcl ?? 'M')
+    }
     if (patch.name !== undefined) meta.name = patch.name
     if (patch.fill !== undefined) obj.set('fill', patch.fill)
     if (patch.stroke !== undefined) obj.set('stroke', patch.stroke)
@@ -680,12 +713,7 @@ export class EditorEngine {
     if (patch.ecl !== undefined) meta.ecl = patch.ecl
     writeMeta(obj, meta)
     if (meta.kind === 'image' && fabricType(obj) === 'image') this.applyFilters(obj as FabricImage, meta)
-    if (meta.kind === 'barcode' && (patch.value !== undefined || patch.symbology !== undefined || patch.showText !== undefined)) {
-      await this.replaceRaster(obj, barcodeDataUrl(meta.value || '0', meta.symbology || 'CODE128', meta.showText !== false))
-    }
-    if (meta.kind === 'qr' && (patch.value !== undefined || patch.ecl !== undefined)) {
-      await this.replaceRaster(obj, await qrDataUrl(meta.value || ' ', meta.ecl ?? 'M'))
-    }
+    if (raster) await this.replaceRaster(obj, raster)
     obj.setCoords()
     this.canvas?.requestRenderAll()
     this.syncSelection()
@@ -924,13 +952,17 @@ export class EditorEngine {
   }
 
   setSize(widthMm: number, heightMm: number, dpi?: number) {
-    const width = clamp(widthMm, 8, 120)
-    const height = clamp(heightMm, 8, 200)
-    const nextDpi = dpi && Number.isFinite(dpi) ? clamp(Math.round(dpi), 96, 600) : this.snapshot.dpi
-    if (nextDpi !== this.snapshot.dpi) this.applyDpi(nextDpi)
-    this.pxW = mmToPx(width, nextDpi)
-    this.pxH = mmToPx(height, nextDpi)
-    this.commit({ widthMm: width, heightMm: height, dpi: nextDpi, cornerMm: defaultCornerMm(width, height) })
+    if (!Number.isFinite(widthMm) || !Number.isFinite(heightMm)) return
+    const bounded = clampSize(widthMm, heightMm, dpi !== undefined && Number.isFinite(dpi) ? dpi : this.snapshot.dpi)
+    if (bounded.dpi !== this.snapshot.dpi) this.applyDpi(bounded.dpi)
+    this.pxW = mmToPx(bounded.widthMm, bounded.dpi)
+    this.pxH = mmToPx(bounded.heightMm, bounded.dpi)
+    this.commit({
+      widthMm: bounded.widthMm,
+      heightMm: bounded.heightMm,
+      dpi: bounded.dpi,
+      cornerMm: defaultCornerMm(bounded.widthMm, bounded.heightMm),
+    })
     this.ensurePaper()
     this.pushHistory()
     this.fit()
@@ -972,7 +1004,8 @@ export class EditorEngine {
   }
 
   setDpi(dpi: number) {
-    const next = clamp(Math.round(dpi), 96, 600)
+    const next = clampDpi(dpi)
+    if (next === null) return
     this.applyDpi(next)
     this.commit({ dpi: next })
     this.pushHistory()
@@ -995,6 +1028,7 @@ export class EditorEngine {
     }
     this.pxW = mmToPx(this.snapshot.widthMm, dpi)
     this.pxH = mmToPx(this.snapshot.heightMm, dpi)
+    this.commit({ dpi })
     this.ensurePaper()
   }
 
@@ -1014,7 +1048,9 @@ export class EditorEngine {
   }
 
   setQuantity(quantity: number) {
-    this.commit({ quantity: clamp(Math.round(quantity), 1, 200) })
+    const next = clampCopies(quantity)
+    if (next === null) return
+    this.commit({ quantity: next })
   }
 
   setAlign(align: AlignMode) {
@@ -1114,7 +1150,8 @@ export class EditorEngine {
     }
     this.history = this.history.slice(0, this.histIndex + 1)
     this.history.push(json)
-    if (this.history.length > 40) this.history.shift()
+    const depth = historyDepth(json.length)
+    while (this.history.length > depth) this.history.shift()
     this.histIndex = this.history.length - 1
     if (this.gesture) this.gestureWrote = true
     this.commit({
@@ -1478,6 +1515,21 @@ function describe(obj: FabricObject): SelectedInfo {
 function colorOf(value: unknown): string {
   if (typeof value === 'string') return value
   return 'transparent'
+}
+
+async function shrinkDataUrl(url: string, maxEdge: number): Promise<string> {
+  const image = await FabricImage.fromURL(url)
+  const target = targetPhotoSize(image.width || 1, image.height || 1, maxEdge)
+  if (!target) return url
+  const canvas = document.createElement('canvas')
+  canvas.width = target.width
+  canvas.height = target.height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return url
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.drawImage(image.getElement(), 0, 0, canvas.width, canvas.height)
+  return canvas.toDataURL('image/jpeg', 0.85)
 }
 
 function readDataUrl(file: File): Promise<string> {

@@ -3,7 +3,8 @@ import { useSyncExternalStore } from 'react'
 import { engine } from '../engine/editor'
 import { applySeriesValue } from '../lib/materialize'
 import { collatedPages, documentHasPageNumber, parsePageRange } from '../lib/pages'
-import { formatPrintError } from '../lib/print-errors'
+import { LabelCodeError } from '../lib/codes'
+import { formatPrintError, linkErrorText } from '../lib/print-errors'
 import { LABEL_TYPES, metaFor, resolvePrintTask, suggestedTask, taskNames } from '../lib/presets'
 import { renderDocumentThermal } from '../lib/render'
 import { browserSupport } from '../lib/browser'
@@ -61,7 +62,7 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
       }
     } catch {
       const snap = printer.getSnapshot()
-      toast(snap.error === 'cancelled' ? t('userCancelled') : snap.error || t('printFail'))
+      toast(linkErrorText(snap.error || 'printFail', lang))
     }
   }
 
@@ -118,7 +119,8 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
       toast(t('printDone'))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      if (message === 'notConnected') toast(t('notConnected'))
+      if (error instanceof LabelCodeError) toast(t(error.kind === 'qr' ? 'qrError' : 'barcodeError'))
+      else if (message === 'notConnected') toast(t('notConnected'))
       else if (message === 'empty') toast(t('printFail'))
       else toast(formatPrintError(error, lang))
     }
@@ -162,6 +164,7 @@ export function PrintDialog({ batch, onClose, onClearBatch }: { batch: BatchJob;
               <Info k={t('serial')} v={link.serial || '—'} />
             </dl>
           )}
+          {link.error && link.status !== 'connected' && <p className="mt-2 text-xs leading-5 text-[var(--danger)]">{linkErrorText(link.error, lang)}</p>}
           <div className="mt-3 flex flex-wrap gap-2">
             <Button variant="accent" disabled={!support.bluetooth || link.printing} onClick={() => void connect('bluetooth')}>
               {t('connectBle')}

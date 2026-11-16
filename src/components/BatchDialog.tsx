@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { engine } from '../engine/editor'
-import { parseCsv, seriesValues } from '../lib/csv'
+import { decodeCsvBytes, parseCsv, seriesValues } from '../lib/csv'
 import { canBindSeries } from '../lib/editor-ui'
 import { toast } from '../toast'
 import { useI18n } from './state'
@@ -106,7 +106,7 @@ export function BatchDialog({
                 onChange={(event) => {
                   const file = event.target.files?.[0]
                   if (!file) return
-                  void file.text().then(setCsvText)
+                  void file.arrayBuffer().then((buffer) => setCsvText(decodeCsvBytes(buffer)))
                   event.target.value = ''
                 }}
               />
