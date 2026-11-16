@@ -5,7 +5,9 @@ export type AlignMode = 'start' | 'center' | 'end'
 export type DitherMode = 'threshold' | 'floyd' | 'atkinson'
 export type DitherChoice = 'inherit' | DitherMode
 export type Sharpness = 'off' | 'clear' | 'strong'
-export type ObjectKind = 'text' | 'image' | 'icon' | 'shape' | 'barcode' | 'qr' | 'datetime' | 'number' | 'paper'
+export type ObjectKind = 'text' | 'image' | 'icon' | 'shape' | 'barcode' | 'qr' | 'datetime' | 'number' | 'paper' | 'group'
+export type TextMode = 'auto' | 'auto-height' | 'fixed'
+export type StrokeAlign = 'center' | 'inside' | 'outside'
 export type QrContentKind = 'text' | 'wifi' | 'vcard' | 'phone' | 'sms' | 'email' | 'geo'
 export type ModuleShape = 'square' | 'rounded' | 'dots'
 export type FinderShape = 'square' | 'rounded' | 'circle'
@@ -58,6 +60,10 @@ export type Meta = {
   prefix?: string
   suffix?: string
   pad?: number
+  textMode?: TextMode
+  strokeAlign?: StrokeAlign
+  /** Stroke width in scene pixels. The canvas stroke may be doubled while clipping inside/outside. */
+  strokePx?: number
 }
 
 export type LabelDocument = {
@@ -106,6 +112,8 @@ export type LayerInfo = {
   kind: ObjectKind
   visible: boolean
   locked: boolean
+  depth: number
+  parentId: string | null
 }
 
 export type SelectedInfo = {
@@ -144,6 +152,10 @@ export type SelectedInfo = {
   suffix?: string
   pad?: number
   frame?: { x: number; y: number; w: number; h: number }
+  lineHeight?: number
+  charSpacing?: number
+  textMode?: TextMode
+  strokeAlign?: StrokeAlign
 }
 
 export type EditorState = {
@@ -172,8 +184,10 @@ export type EditorState = {
   dirty: boolean
   layers: LayerInfo[]
   selectedId: string | null
+  selectedIds: string[]
   selected: SelectedInfo | null
   multi: number
+  scaleTool: boolean
   contentRev: number
   workspace: string
   cornerMm: number
@@ -269,8 +283,10 @@ export const initialEditorState = (): EditorState => ({
   dirty: false,
   layers: [],
   selectedId: null,
+  selectedIds: [],
   selected: null,
   multi: 0,
+  scaleTool: false,
   contentRev: 0,
   workspace: '#000000',
   cornerMm: 1.5,

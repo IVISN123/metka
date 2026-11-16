@@ -190,6 +190,93 @@ export function NumberField({
   )
 }
 
+export function ScrubField({
+  label,
+  value,
+  min,
+  max,
+  step = 0.1,
+  onChange,
+  onGestureStart,
+  onGestureEnd,
+}: {
+  label: string
+  value: number
+  min?: number
+  max?: number
+  step?: number
+  onChange: (value: number) => void
+  onGestureStart?: () => void
+  onGestureEnd?: () => void
+}) {
+  const [draft, setDraft] = useState(formatScrub(value))
+  const [seen, setSeen] = useState(value)
+  if (seen !== value) {
+    setSeen(value)
+    setDraft(formatScrub(value))
+  }
+  const clampValue = (next: number) => {
+    const low = min ?? next
+    const high = max ?? next
+    return Math.min(high, Math.max(low, next))
+  }
+  const commit = (raw: string) => {
+    const next = Number(raw.replace(',', '.'))
+    if (!Number.isFinite(next)) {
+      setDraft(formatScrub(value))
+      return
+    }
+    onChange(clampValue(next))
+  }
+  return (
+    <div className="flex h-11 items-center rounded-xl border-2 border-[var(--border)] bg-[var(--field)] focus-within:border-[var(--accent)]">
+      <button
+        type="button"
+        aria-label={label}
+        title={label}
+        className="scrub-label h-full w-8 shrink-0 cursor-ew-resize rounded-l-[10px] text-xs font-bold text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+        onPointerDown={(event) => {
+          event.preventDefault()
+          const pointer = event.pointerId
+          event.currentTarget.setPointerCapture(pointer)
+          const startX = event.clientX
+          const start = value
+          onGestureStart?.()
+          const move = (ev: PointerEvent) => {
+            const fine = ev.shiftKey ? step / 10 : step
+            onChange(clampValue(start + (ev.clientX - startX) * fine))
+          }
+          const end = () => {
+            window.removeEventListener('pointermove', move)
+            window.removeEventListener('pointerup', end)
+            onGestureEnd?.()
+          }
+          window.addEventListener('pointermove', move)
+          window.addEventListener('pointerup', end)
+        }}
+      >
+        {label}
+      </button>
+      <input
+        aria-label={label}
+        inputMode="decimal"
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={() => commit(draft)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.currentTarget.blur()
+        }}
+        className="h-full min-w-0 flex-1 bg-transparent pr-2 text-right text-sm font-bold tabular-nums outline-none"
+      />
+    </div>
+  )
+}
+
+function formatScrub(value: number) {
+  if (!Number.isFinite(value)) return ''
+  return String(Math.round(value * 100) / 100)
+}
+
 export function CheckRow({
   checked,
   onChange,

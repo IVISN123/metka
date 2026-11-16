@@ -9,8 +9,8 @@ export type ShortcutInput = {
 }
 
 export type Shortcut =
-  | { type: 'undo' | 'redo' | 'duplicate' | 'copy' | 'selectAll' | 'delete' | 'fit' | 'zoomIn' | 'zoomOut' | 'deselect' | 'pan' }
-  | { type: 'nudge'; dx: number; dy: number }
+  | { type: 'undo' | 'redo' | 'duplicate' | 'copy' | 'selectAll' | 'delete' | 'fit' | 'zoomIn' | 'zoomOut' | 'deselect' | 'pan' | 'group' | 'ungroup' | 'scale' }
+  | { type: 'nudge'; dx: number; dy: number; fast: boolean }
 
 export function matchEditorShortcut(input: ShortcutInput): Shortcut | null {
   const key = input.key.toLowerCase()
@@ -18,7 +18,10 @@ export function matchEditorShortcut(input: ShortcutInput): Shortcut | null {
   if (input.meta && key === 'z' && !input.shift) return { type: 'undo' }
   if (input.meta && (key === 'y' || (key === 'z' && input.shift))) return { type: 'redo' }
   if (input.meta && key === 'd' && !input.shift) return { type: 'duplicate' }
+  if (input.meta && key === 'g' && input.shift) return { type: 'ungroup' }
+  if (input.meta && key === 'g' && !input.shift) return { type: 'group' }
   if (input.meta && key === 'c' && !input.shift) return { type: 'copy' }
+  if (!input.meta && !input.alt && !input.shift && key === 'k') return { type: 'scale' }
   if (input.meta && key === 'a' && !input.shift) return { type: 'selectAll' }
   if (input.meta && !input.shift && (input.code === 'Digit0' || input.code === 'Numpad0')) return { type: 'fit' }
   if (input.meta && !input.shift && (input.code === 'Equal' || input.code === 'NumpadAdd')) return { type: 'zoomIn' }
@@ -26,11 +29,11 @@ export function matchEditorShortcut(input: ShortcutInput): Shortcut | null {
   if (!input.meta && !input.alt && (input.key === 'Delete' || input.key === 'Backspace')) return { type: 'delete' }
   if (!input.meta && !input.alt && input.key === 'Escape') return { type: 'deselect' }
   if (!input.meta && !input.alt) {
-    const step = input.shift ? 10 : 1
-    if (input.key === 'ArrowLeft') return { type: 'nudge', dx: -step, dy: 0 }
-    if (input.key === 'ArrowRight') return { type: 'nudge', dx: step, dy: 0 }
-    if (input.key === 'ArrowUp') return { type: 'nudge', dx: 0, dy: -step }
-    if (input.key === 'ArrowDown') return { type: 'nudge', dx: 0, dy: step }
+    const fast = input.shift
+    if (input.key === 'ArrowLeft') return { type: 'nudge', dx: -1, dy: 0, fast }
+    if (input.key === 'ArrowRight') return { type: 'nudge', dx: 1, dy: 0, fast }
+    if (input.key === 'ArrowUp') return { type: 'nudge', dx: 0, dy: -1, fast }
+    if (input.key === 'ArrowDown') return { type: 'nudge', dx: 0, dy: 1, fast }
   }
   return null
 }

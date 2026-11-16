@@ -1,10 +1,29 @@
 # Метка
 
-A static label designer and printer for Niimbot thermal printers. It runs entirely in the browser: design a label, preview the 1-bit raster, and send it over Web Bluetooth or Web Serial. Nothing is uploaded. There is no account and no backend.
+**Метка — кастомный улучшенный редактор этикеток для Niimbot.**  
+**Metka — a custom enhanced Niimbot label editor.**
 
-The print path uses [`@mmote/niimbluelib`](https://github.com/MultiMote/niimbluelib) 0.49.0, the library behind [NiimBlue](https://niim.blue/). **It has not been tested on a physical printer in this environment.** Chrome or Edge on desktop or Android, served over HTTPS (or `localhost`), is required for a real print. Safari on iPhone and iPad cannot print from this page.
+Design a label in the browser the way you would in Figma: select a block, drag it, resize the geometry, edit text on the canvas, and restack layers. Then preview the 1-bit raster and send it to a Niimbot thermal printer over Web Bluetooth or Web Serial. Nothing is uploaded. There is no account and no backend.
 
 Метка is an independent project. It is not affiliated with or endorsed by NIIMBOT.
+
+## What the editor does
+
+- Bounding box with eight handles and a rotation zone. Shift keeps proportions, Alt resizes from the center, arrow keys nudge (Shift moves 1 mm).
+- Smart guides snap to the label edges, the center, and other objects, with distance labels in millimetres.
+- Marquee and Shift-click multi-select, group and ungroup, duplicate with Ctrl/⌘+D or Alt-drag, lock and hide.
+- Text like a layout tool: double-click to edit on the canvas, auto-width / auto-height / fixed size, alignment, line height, letter spacing. Resizing the box does not scale the glyphs. Press K when you do want the font size to follow the corner.
+- Shapes keep a constant stroke width and corner radius in millimetres. Stretching changes width and height, not a scale transform. Stroke can sit center, inside, or outside.
+- A compact design panel: X, Y, W, H and rotation in millimetres, with labels you can drag to scrub the value. Fill and stroke sit in their own sections.
+- A layers panel with drag-and-drop reorder (z-order only), a drop indicator, nested groups, rename on double-click, and visibility and lock toggles that stay in sync with the canvas.
+- Light, dim, and dark themes. Panel, menu, and layer motion respects `prefers-reduced-motion`.
+- Niimbot sizes, photos, icons, barcodes, QR codes, dates, and series data. QR and barcodes are vector objects: resizing calls `setBox` so the modules redraw into the new box.
+
+## Credits
+
+Printing uses [`@mmote/niimbluelib`](https://github.com/MultiMote/niimbluelib) 0.49.0, the library behind [NiimBlue](https://niim.blue/). **It has not been tested on a physical printer in this environment.** Chrome or Edge on desktop or Android, served over HTTPS (or `localhost`), is required for a real print. Safari on iPhone and iPad cannot print from this page.
+
+Icons in the interface and most label symbols are from [Lucide](https://lucide.dev/) (ISC), bundled in the app. A few label marks are drawn for Метка. The UI fonts and the label fonts (Roboto, Open Sans, PT Sans, PT Serif, Montserrat, Inter, Rubik, Oswald, Roboto Condensed, Nunito, Manrope, IBM Plex Sans, IBM Plex Mono, Golos Text, Unbounded, Exo 2, Noto Sans, Noto Serif, Fira Sans, JetBrains Mono, OpenGOST type A, OpenGOST type B) are under the SIL Open Font License 1.1. See `src/fonts/OFL.txt` and `src/fonts/OFL-OpenGost.txt`. They are stored in this repository and are not loaded from a network at runtime.
 
 ## Run locally
 

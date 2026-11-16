@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import {
   AlignCenter,
   AlignCenterVertical,
@@ -10,6 +10,9 @@ import {
   AlignVerticalSpaceAround,
   Copy,
   GripVertical,
+  Group as GroupIcon,
+  Ungroup,
+  ChevronRight,
   Barcode,
   Bold,
   ChevronDown,
@@ -49,7 +52,7 @@ import type { LayerInfo, ObjectKind } from '../types'
 import { toast } from '../toast'
 import { useI18n } from './state'
 import { useEngine } from './Stage'
-import { Button, CheckRow, Field, IconButton, NumberField, SelectInput, Slider, TextInput } from './ui'
+import { Button, CheckRow, Field, IconButton, ScrubField, SelectInput, Slider, TextInput } from './ui'
 
 const KIND_ICON: Record<ObjectKind, typeof Type> = {
   text: Type,
@@ -61,6 +64,7 @@ const KIND_ICON: Record<ObjectKind, typeof Type> = {
   datetime: Clock,
   number: Hash,
   paper: Square,
+  group: GroupIcon,
 }
 
 export function ToolPanel({ onPicked }: { onPicked?: () => void }) {
@@ -139,49 +143,185 @@ function ShapeButton({ label, onClick, icon }: { label: string; onClick: () => v
 export function LayerList() {
   const { state } = useEngine()
   const { t } = useI18n()
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const [editing, setEditing] = useState<string | null>(null)
+  const [drop, setDrop] = useState<{ id: string; place: 'before' | 'after' | 'into' } | null>(null)
+  const reduced = useReducedMotion()
+  const listRef = useRef<HTMLUListElement>(null)
+  const tops = useRef(new Map<string, number>())
+  const visible = state.layers.filter((layer) => {
+    let parent = layer.parentId
+    while (parent) {
+      if (collapsed[parent]) return false
+      parent = state.layers.find((item) => item.id === parent)?.parentId ?? null
+    }
+    return true
+  })
+  const signature = visible.map((layer) => layer.id).join('|')
+  useLayoutEffect(() => {
+    const list = listRef.current
+    if (!list) return
+    for (const node of list.querySelectorAll<HTMLElement>('[data-layer-id]')) {
+      const id = node.dataset.layerId
+      if (!id) continue
+      const next = node.getBoundingClientRect().top
+      const prev = tops.current.get(id)
+      if (prev !== undefined && Math.abs(prev - next) > 1 && !reduced) {
+        node.animate([{ transform: `translateY(${prev - next}px)` }, { transform: 'translateY(0)' }], {
+          duration: 180,
+          easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+        })
+      }
+      tops.current.set(id, next)
+    }
+  }, [signature, reduced])
   return (
     <div className="min-h-0 flex-1 overflow-auto p-3">
       <div className="mb-2 text-xs font-bold uppercase tracking-wide text-[var(--muted)]">{t('layers')}</div>
-      {state.layers.length === 0 && <p className="text-sm text-[var(--muted)]">{t('emptyLayers')}</p>}
-      <ul className="flex flex-col gap-1">
-        {state.layers.map((layer) => (
-          <LayerRow key={layer.id} layer={layer} active={layer.id === state.selectedId} />
+      {visible.length === 0 && <p className="text-sm text-[var(--muted)]">{t('emptyLayers')}</p>}
+      <ul ref={listRef} className="flex flex-col">
+        {visible.map((layer) => (
+          <LayerRow
+            key={layer.id}
+            layer={layer}
+            active={state.selectedIds.includes(layer.id)}
+            nested={state.layers.some((item) => item.parentId === layer.id)}
+            collapsed={!!collapsed[layer.id]}
+            editing={editing === layer.id}
+            drop={drop?.id === layer.id ? drop.place : null}
+            onToggle={() => setCollapsed((current) => ({ ...current, [layer.id]: !current[layer.id] }))}
+            onEdit={() => setEditing(layer.id)}
+            onEditDone={() => setEditing(null)}
+            onGripDown={(event) => startLayerDrag(event, layer.id, setDrop)}
+          />
         ))}
       </ul>
     </div>
   )
 }
 
-function LayerRow({ layer, active }: { layer: LayerInfo; active: boolean }) {
+function startLayerDrag(
+  event: ReactPointerEvent<HTMLButtonElement>,
+  id: string,
+  setDrop: (drop: { id: string; place: 'before' | 'after' | 'into' } | null) => void,
+) {
+  event.preventDefault()
+  event.stopPropagation()
+  const pointer = event.pointerId
+  event.currentTarget.setPointerCapture(pointer)
+  let moved = false
+  const move = (ev: PointerEvent) => {
+    if (!moved && Math.abs(ev.clientY - event.clientY) < 4) return
+    moved = true
+    const hit = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>('[data-layer-id]')
+    const over = hit?.dataset.layerId
+    if (!hit || !over || over === id) {
+      setDrop(null)
+      return
+    }
+    const rect = hit.getBoundingClientRect()
+    const ratio = rect.height > 0 ? (ev.clientY - rect.top) / rect.height : 0.5
+    const into = hit.dataset.kind === 'group' && ratio > 0.28 && ratio < 0.72
+    setDrop({ id: over, place: into ? 'into' : ratio < 0.5 ? 'before' : 'after' })
+  }
+  const up = () => {
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', up)
+    if (event.currentTarget.hasPointerCapture?.(pointer)) event.currentTarget.releasePointerCapture(pointer)
+    setDrop(null)
+  }
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', up)
+  const commit = (ev: PointerEvent) => {
+    window.removeEventListener('pointerup', commit)
+    if (!moved) return
+    const hit = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>('[data-layer-id]')
+    const over = hit?.dataset.layerId
+    if (!hit || !over || over === id) return
+    const rect = hit.getBoundingClientRect()
+    const ratio = rect.height > 0 ? (ev.clientY - rect.top) / rect.height : 0.5
+    const place = hit.dataset.kind === 'group' && ratio > 0.28 && ratio < 0.72 ? 'into' : ratio < 0.5 ? 'before' : 'after'
+    engine.moveLayer(id, over, place)
+  }
+  window.addEventListener('pointerup', commit)
+}
+
+function LayerRow({
+  layer,
+  active,
+  nested,
+  collapsed,
+  editing,
+  drop,
+  onToggle,
+  onEdit,
+  onEditDone,
+  onGripDown,
+}: {
+  layer: LayerInfo
+  active: boolean
+  nested: boolean
+  collapsed: boolean
+  editing: boolean
+  drop: 'before' | 'after' | 'into' | null
+  onToggle: () => void
+  onEdit: () => void
+  onEditDone: () => void
+  onGripDown: (event: ReactPointerEvent<HTMLButtonElement>) => void
+}) {
   const { t } = useI18n()
   const Icon = KIND_ICON[layer.kind]
+  const edge = drop === 'before' ? 'shadow-[inset_0_2px_0_var(--accent)]' : drop === 'after' ? 'shadow-[inset_0_-2px_0_var(--accent)]' : ''
   return (
     <li
-      className={`flex items-center gap-1 rounded-2xl pr-1 ${active ? 'bg-[var(--hover)]' : 'hover:bg-[var(--hover)]'}`}
-      onDragOver={(event) => event.preventDefault()}
-      onDrop={(event) => {
-        event.preventDefault()
-        const id = event.dataTransfer.getData('text/plain')
-        if (id) engine.moveLayer(id, layer.id)
-      }}
+      data-layer-id={layer.id}
+      data-kind={layer.kind}
+      className={`layer-row flex items-center gap-0.5 rounded-xl pr-1 ${edge} ${drop === 'into' ? 'bg-[var(--accent)]/15' : active ? 'bg-[var(--hover)]' : 'hover:bg-[var(--hover)]'}`}
+      style={{ paddingLeft: 4 + layer.depth * 14 }}
     >
+      {nested ? (
+        <button type="button" aria-label={collapsed ? t('expandGroup') : t('collapseGroup')} className="grid h-11 w-6 shrink-0 place-items-center text-[var(--muted)]" onClick={onToggle}>
+          <ChevronRight size={14} className={`transition-transform ${collapsed ? '' : 'rotate-90'}`} />
+        </button>
+      ) : (
+        <span className="w-6 shrink-0" />
+      )}
       <button
         type="button"
-        draggable
         aria-label={t('reorder')}
         title={t('reorder')}
-        className="grid h-11 w-8 shrink-0 cursor-grab place-items-center text-[var(--icon)]"
-        onDragStart={(event) => {
-          event.dataTransfer.setData('text/plain', layer.id)
-          event.dataTransfer.effectAllowed = 'move'
-        }}
+        className="grid h-11 w-7 shrink-0 cursor-grab place-items-center text-[var(--icon)] active:cursor-grabbing"
+        onPointerDown={onGripDown}
       >
         <GripVertical size={16} />
       </button>
-      <button type="button" onClick={() => engine.select(layer.id)} className="flex min-w-0 flex-1 items-center gap-2 px-1 py-2 text-left text-sm text-[var(--text)]">
-        <Icon size={16} className="shrink-0 text-[var(--icon)]" />
-        <span className="truncate">{layer.name}</span>
-      </button>
+      {editing ? (
+        <input
+          autoFocus
+          aria-label={t('layerRename')}
+          defaultValue={layer.name}
+          className="h-9 min-w-0 flex-1 rounded-lg border border-[var(--accent)] bg-transparent px-2 text-sm outline-none"
+          onBlur={(event) => {
+            const name = event.target.value.trim()
+            if (name && name !== layer.name) engine.renameLayer(layer.id, name)
+            onEditDone()
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') event.currentTarget.blur()
+            if (event.key === 'Escape') onEditDone()
+          }}
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={(event) => engine.select(layer.id, event.shiftKey)}
+          onDoubleClick={onEdit}
+          className={`flex h-11 min-w-0 flex-1 items-center gap-2 text-left text-sm ${layer.visible ? 'text-[var(--text)]' : 'text-[var(--muted)]'}`}
+        >
+          <Icon size={16} className="shrink-0 text-[var(--icon)]" />
+          <span className="truncate">{layer.name}</span>
+        </button>
+      )}
       <IconButton label={layer.visible ? t('hide') : t('show')} onClick={() => engine.toggleVisible(layer.id)}>
         {layer.visible ? <Eye size={15} /> : <EyeOff size={15} />}
       </IconButton>
@@ -190,6 +330,18 @@ function LayerRow({ layer, active }: { layer: LayerInfo; active: boolean }) {
       </IconButton>
     </li>
   )
+}
+
+function useReducedMotion() {
+  const [reduced, setReduced] = useState(false)
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const sync = () => setReduced(media.matches)
+    sync()
+    media.addEventListener('change', sync)
+    return () => media.removeEventListener('change', sync)
+  }, [])
+  return reduced
 }
 
 export function Inspector() {
@@ -211,6 +363,8 @@ export function Inspector() {
             <IconButton label={t('alignMiddle')} onClick={() => engine.align('middle')}><AlignCenterVertical size={18} /></IconButton>
             <IconButton label={t('alignBottom')} onClick={() => engine.align('bottom')}><AlignEndVertical size={18} /></IconButton>
             <IconButton label={t('duplicate')} onClick={() => void engine.duplicate()}><Copy size={18} /></IconButton>
+            <IconButton label={t('group')} disabled={state.multi < 2} onClick={() => engine.groupSelected()}><GroupIcon size={18} /></IconButton>
+            <IconButton label={t('ungroup')} disabled={selected?.kind !== 'group'} onClick={() => engine.ungroupSelected()}><Ungroup size={18} /></IconButton>
             <IconButton label={t('distributeH')} disabled={state.multi < 3} onClick={() => engine.distribute('x')}><AlignHorizontalSpaceAround size={18} /></IconButton>
             <IconButton label={t('distributeV')} disabled={state.multi < 3} onClick={() => engine.distribute('y')}><AlignVerticalSpaceAround size={18} /></IconButton>
             <IconButton label={t('deleteObj')} onClick={() => engine.deleteSelected()}><Trash2 size={16} /></IconButton>
@@ -222,20 +376,17 @@ export function Inspector() {
               <TextInput value={selected.name} onChange={(event) => void engine.updateSelected({ name: event.target.value })} />
             </Field>
             {selected.frame && (
-              <div className="grid grid-cols-2 gap-2">
-                <Field label={t('posX')}>
-                  <NumberField label={t('posX')} value={selected.frame.x} min={-20} max={200} onCommit={(xMm) => engine.setFrame({ xMm })} />
-                </Field>
-                <Field label={t('posY')}>
-                  <NumberField label={t('posY')} value={selected.frame.y} min={-20} max={200} onCommit={(yMm) => engine.setFrame({ yMm })} />
-                </Field>
-                <Field label={t('posW')}>
-                  <NumberField label={t('posW')} value={selected.frame.w} min={0.2} max={200} onCommit={(wMm) => engine.setFrame({ wMm })} />
-                </Field>
-                <Field label={t('posH')}>
-                  <NumberField label={t('posH')} value={selected.frame.h} min={0.2} max={200} onCommit={(hMm) => engine.setFrame({ hMm })} />
-                </Field>
+              <div className="grid grid-cols-2 gap-1.5">
+                <ScrubField label="X" value={selected.frame.x} min={-40} max={240} onGestureStart={() => engine.beginGesture()} onGestureEnd={() => engine.endGesture()} onChange={(xMm) => engine.setFrame({ xMm })} />
+                <ScrubField label="Y" value={selected.frame.y} min={-40} max={240} onGestureStart={() => engine.beginGesture()} onGestureEnd={() => engine.endGesture()} onChange={(yMm) => engine.setFrame({ yMm })} />
+                <ScrubField label="W" value={selected.frame.w} min={0.2} max={240} onGestureStart={() => engine.beginGesture()} onGestureEnd={() => engine.endGesture()} onChange={(wMm) => engine.setFrame({ wMm })} />
+                <ScrubField label="H" value={selected.frame.h} min={0.2} max={240} onGestureStart={() => engine.beginGesture()} onGestureEnd={() => engine.endGesture()} onChange={(hMm) => engine.setFrame({ hMm })} />
+                <ScrubField label="°" value={selected.angle} min={-180} max={180} step={1} onGestureStart={() => engine.beginGesture()} onGestureEnd={() => engine.endGesture()} onChange={(angle) => void engine.updateSelected({ angle })} />
               </div>
+            )}
+            {selected.frame && <p className="text-[11px] leading-4 text-[var(--muted)]">{t('transformHint')}</p>}
+            {state.scaleTool && (selected.kind === 'text' || selected.kind === 'datetime' || selected.kind === 'number') && (
+              <p className="rounded-xl bg-[var(--hover)] px-3 py-2 text-xs font-medium">{t('scaleToolOn')}</p>
             )}
             {(selected.kind === 'text' || selected.kind === 'datetime' || selected.kind === 'number') && (
               <>
@@ -294,9 +445,22 @@ export function Inspector() {
                     />
                   </Field>
                 )}
-                <Field label={t('fontSize')}>
-                  <HistorySlider label={t('fontSize')} min={8} max={160} value={selected.fontSize ?? 16} onChange={(value) => void engine.updateSelected({ fontSize: value })} />
-                </Field>
+                <div className="grid grid-cols-3 gap-1">
+                  {([
+                    ['auto', t('textAuto')],
+                    ['auto-height', t('textAutoHeight')],
+                    ['fixed', t('textFixed')],
+                  ] as const).map(([mode, label]) => (
+                    <Button key={mode} className="px-2 text-xs" variant={(selected.textMode ?? 'auto-height') === mode ? 'accent' : 'ghost'} onClick={() => void engine.updateSelected({ textMode: mode })}>
+                      {label}
+                    </Button>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <ScrubField label={t('fontSizeShort')} value={selected.fontSize ?? 16} min={4} max={400} step={1} onGestureStart={() => engine.beginGesture()} onGestureEnd={() => engine.endGesture()} onChange={(fontSize) => void engine.updateSelected({ fontSize })} />
+                  <ScrubField label={t('lineHeightShort')} value={Math.round((selected.lineHeight ?? 1.16) * 100) / 100} min={0.5} max={3} step={0.05} onGestureStart={() => engine.beginGesture()} onGestureEnd={() => engine.endGesture()} onChange={(lineHeight) => void engine.updateSelected({ lineHeight })} />
+                  <ScrubField label={t('letterShort')} value={selected.charSpacing ?? 0} min={-200} max={800} step={10} onGestureStart={() => engine.beginGesture()} onGestureEnd={() => engine.endGesture()} onChange={(charSpacing) => void engine.updateSelected({ charSpacing })} />
+                </div>
                 <div className="flex gap-1">
                   <Toggle on={String(selected.fontWeight) === '700' || selected.fontWeight === 'bold'} label={t('bold')} onClick={() => void engine.updateSelected({ fontWeight: String(selected.fontWeight) === '700' ? '400' : '700' })}>
                     <Bold size={16} />
@@ -367,19 +531,41 @@ export function Inspector() {
               <>
                 <Swatches label={t('fill')} value={selected.fill} onChange={(fill) => void engine.updateSelected({ fill })} />
                 <Swatches label={t('stroke')} value={selected.stroke} onChange={(stroke) => void engine.updateSelected({ stroke })} />
-                <Field label={t('strokeWidth')}>
-                  <HistorySlider label={t('strokeWidth')} min={0} max={12} value={selected.strokeWidth} onChange={(strokeWidth) => void engine.updateSelected({ strokeWidth })} />
-                </Field>
+                <ScrubField
+                  label={t('strokeShort')}
+                  value={pxMm(selected.strokeWidth, state.dpi)}
+                  min={0}
+                  max={4}
+                  step={0.05}
+                  onGestureStart={() => engine.beginGesture()}
+                  onGestureEnd={() => engine.endGesture()}
+                  onChange={(mm) => void engine.updateSelected({ strokeWidth: (mm * state.dpi) / 25.4 })}
+                />
+                <div className="grid grid-cols-3 gap-1">
+                  {([
+                    ['center', t('strokeCenter')],
+                    ['inside', t('strokeInside')],
+                    ['outside', t('strokeOutside')],
+                  ] as const).map(([align, label]) => (
+                    <Button key={align} className="px-2 text-xs" variant={(selected.strokeAlign ?? 'center') === align ? 'accent' : 'ghost'} onClick={() => void engine.updateSelected({ strokeAlign: align })}>
+                      {label}
+                    </Button>
+                  ))}
+                </div>
               </>
             )}
             {selected.rx !== undefined && (
-              <Field label={t('radius')}>
-                <HistorySlider label={t('radius')} min={0} max={40} value={selected.rx} onChange={(rx) => void engine.updateSelected({ rx })} />
-              </Field>
+              <ScrubField
+                label={t('radiusShort')}
+                value={pxMm(selected.rx, state.dpi)}
+                min={0}
+                max={8}
+                step={0.1}
+                onGestureStart={() => engine.beginGesture()}
+                onGestureEnd={() => engine.endGesture()}
+                onChange={(mm) => void engine.updateSelected({ rx: (mm * state.dpi) / 25.4 })}
+              />
             )}
-            <Field label={t('angle')}>
-              <HistorySlider label={t('angle')} min={-180} max={180} value={selected.angle} onChange={(angle) => void engine.updateSelected({ angle })} />
-            </Field>
             <Field label={t('opacity')}>
               <HistorySlider
                 label={t('opacity')}
@@ -405,6 +591,11 @@ export function Inspector() {
       </div>
     </div>
   )
+}
+
+function pxMm(px: number, dpi: number) {
+  if (!Number.isFinite(px) || !Number.isFinite(dpi) || dpi <= 0) return 0
+  return Math.round(((px * 25.4) / dpi) * 100) / 100
 }
 
 function HistorySlider(props: ComponentProps<typeof Slider>) {
