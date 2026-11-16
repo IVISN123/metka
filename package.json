@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview --host 127.0.0.1 --port 43123 --strictPort",
-    "test": "vitest run"
+    "test": "vitest run",
+    "pin-hash": "node --experimental-strip-types scripts/pin-hash.ts"
   },
   "dependencies": {
     "@mmote/niimbluelib": "0.49.0",

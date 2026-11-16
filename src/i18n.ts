@@ -278,6 +278,12 @@ const ru = {
   flashBadVersion: 'Версия в виде 4.28',
   flashLink: 'Официальные образы D11_H (не наши, скачиваете сами)',
   flashLinkTest: 'Тестовый 4.28 с того же архива',
+  pinTitle: 'Введите PIN',
+  pinLabel: 'PIN-код',
+  pinHint: 'Четыре цифры. На этом устройстве код запоминается.',
+  pinWrong: 'Неверный PIN',
+  pinWait: 'Слишком много попыток. Подождите немного.',
+  pinLock: 'Заблокировать',
 } as const
 
 const en: { [K in keyof typeof ru]: string } = {
@@ -558,6 +564,12 @@ const en: { [K in keyof typeof ru]: string } = {
   flashBadVersion: 'Version looks like 4.28',
   flashLink: 'Official D11_H images (not ours; you download them)',
   flashLinkTest: 'Testing build 4.28 from that archive',
+  pinTitle: 'Enter the PIN',
+  pinLabel: 'PIN',
+  pinHint: 'Four digits. This device remembers the code.',
+  pinWrong: 'Wrong PIN',
+  pinWait: 'Too many attempts. Wait a moment.',
+  pinLock: 'Lock',
 }
 
 export type I18nKey = keyof typeof ru

@@ -26,6 +26,7 @@ import { Gallery } from './Gallery'
 import { Inspector, LayerList, ToolPanel } from './Panels'
 import { PrintDialog, type BatchJob } from './PrintDialog'
 import { Stage, useEngine } from './Stage'
+import { PinLockItem } from './PinGate'
 import { useI18n, useTheme } from './state'
 import { Button, IconButton, TextInput, Toasts } from './ui'
 
@@ -145,7 +146,8 @@ export function Shell() {
 
   return (
     <div className="relative flex h-dvh flex-col bg-[var(--bg)] text-[var(--text)]">
-      <header ref={menuRef} className="relative z-30 flex h-14 shrink-0 items-center gap-1 overflow-x-auto border-b border-[var(--border)] px-2 sm:gap-2 sm:px-3">
+      <header ref={menuRef} className="relative z-30 h-14 shrink-0 border-b border-[var(--border)]">
+        <div className="flex h-full items-center gap-1 overflow-x-auto px-2 sm:gap-2 sm:px-3">
         <div className="mr-1 flex items-center gap-2 pl-1">
           <span className="grid h-8 w-8 place-items-center rounded-full bg-[var(--text)] text-xs font-black text-[var(--bg)]">M</span>
           <span className="hidden text-[17px] font-black tracking-tight sm:inline">{t('appName')}</span>
@@ -204,6 +206,7 @@ export function Shell() {
           <Printer size={16} />
           <span className="hidden sm:inline">{t('print')}</span>
         </Button>
+        </div>
         {menu === 'theme' && (
           <div className="absolute right-3 top-14 z-40 w-44 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-1 shadow-xl">
             {(['dark', 'dim', 'light'] as ThemeName[]).map((item) => (
@@ -250,6 +253,7 @@ export function Shell() {
             >
               {t('newLabel')}
             </MenuItem>
+            <PinLockItem label={t('pinLock')} />
           </div>
         )}
         {menu === 'size' && (

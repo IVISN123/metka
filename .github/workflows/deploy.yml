@@ -26,6 +26,10 @@ jobs:
           node-version: 22
           cache: npm
       - name: Install and build
+        env:
+          # Optional. Empty secrets leave the PIN gate off.
+          VITE_METKA_PIN_HASH: ${{ secrets.VITE_METKA_PIN_HASH }}
+          VITE_METKA_PIN_SALT: ${{ secrets.VITE_METKA_PIN_SALT }}
         run: npm ci && npm run build
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
