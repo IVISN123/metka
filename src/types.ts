@@ -53,6 +53,7 @@ export type LabelDocument = {
   pageFrom?: number
   pageTo?: number
   preview: PreviewSettings
+  cornerMm?: number
   canvas: Record<string, unknown>
 }
 
@@ -112,6 +113,7 @@ export type SelectedInfo = {
   prefix?: string
   suffix?: string
   pad?: number
+  frame?: { x: number; y: number; w: number; h: number }
 }
 
 export type EditorState = {
@@ -143,6 +145,7 @@ export type EditorState = {
   multi: number
   contentRev: number
   workspace: string
+  cornerMm: number
 }
 
 export type RfidView = {
@@ -221,4 +224,5 @@ export const initialEditorState = (): EditorState => ({
   multi: 0,
   contentRev: 0,
   workspace: '#000000',
+  cornerMm: 1.5,
 })

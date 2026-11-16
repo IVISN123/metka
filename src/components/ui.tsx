@@ -1,4 +1,5 @@
-import { useEffect, useSyncExternalStore, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react'
+import { useEffect, useState, useSyncExternalStore, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react'
+import { classSetsDisplay } from '../lib/editor-ui'
 import { getToasts, subscribeToasts } from '../toast'
 
 export function cx(...parts: Array<string | false | null | undefined>) {
@@ -22,7 +23,8 @@ export function Button({
     <button
       {...props}
       className={cx(
-        'inline-flex h-9 items-center justify-center gap-2 rounded-full px-4 text-sm font-bold transition-colors disabled:pointer-events-none disabled:opacity-40',
+        !classSetsDisplay(className) && 'inline-flex',
+        'h-11 shrink-0 items-center justify-center gap-2 rounded-full px-4 text-sm font-bold transition-colors disabled:pointer-events-none disabled:opacity-40',
         look,
         className,
       )}
@@ -42,7 +44,7 @@ export function IconButton({
       aria-label={label}
       title={label}
       className={cx(
-        'grid h-9 w-9 place-items-center rounded-full text-[var(--text)] transition-colors hover:bg-[var(--hover)] disabled:opacity-30',
+        'grid h-11 w-11 shrink-0 place-items-center rounded-full text-[var(--text)] transition-colors hover:bg-[var(--hover)] disabled:opacity-30',
         className,
       )}
     >
@@ -81,23 +83,127 @@ export function Slider({
   max,
   step,
   onChange,
+  label,
+  onGestureStart,
+  onGestureEnd,
 }: {
   value: number
   min: number
   max: number
   step?: number
   onChange: (value: number) => void
+  label?: string
+  onGestureStart?: () => void
+  onGestureEnd?: () => void
 }) {
+  const [draft, setDraft] = useState(String(value))
+  const [seen, setSeen] = useState(value)
+  if (seen !== value) {
+    setSeen(value)
+    setDraft(String(value))
+  }
+  const commit = (raw: string) => {
+    const next = Number(raw.replace(',', '.'))
+    if (!Number.isFinite(next)) {
+      setDraft(String(value))
+      return
+    }
+    onChange(Math.min(max, Math.max(min, next)))
+  }
+  return (
+    <div className="flex items-center gap-3">
+      <input
+        type="range"
+        aria-label={label}
+        min={min}
+        max={max}
+        step={step ?? 1}
+        value={value}
+        onPointerDown={() => onGestureStart?.()}
+        onPointerUp={() => onGestureEnd?.()}
+        onPointerCancel={() => onGestureEnd?.()}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="h-11 min-w-0 flex-1 accent-[var(--accent)]"
+      />
+      <input
+        type="number"
+        aria-label={label}
+        min={min}
+        max={max}
+        step={step ?? 1}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={() => commit(draft)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.currentTarget.blur()
+        }}
+        className="h-11 w-16 shrink-0 rounded-xl border-2 border-[var(--border)] bg-[var(--field)] px-1 text-center text-sm font-bold tabular-nums outline-none focus:border-[var(--accent)]"
+      />
+    </div>
+  )
+}
+
+export function NumberField({
+  value,
+  onCommit,
+  label,
+  min,
+  max,
+  step = 0.1,
+}: {
+  value: number
+  onCommit: (value: number) => void
+  label: string
+  min?: number
+  max?: number
+  step?: number
+}) {
+  const [draft, setDraft] = useState(String(value))
+  const [seen, setSeen] = useState(value)
+  if (seen !== value) {
+    setSeen(value)
+    setDraft(String(value))
+  }
+  const commit = () => {
+    const next = Number(draft.replace(',', '.'))
+    if (!Number.isFinite(next)) {
+      setDraft(String(value))
+      return
+    }
+    const low = min ?? next
+    const high = max ?? next
+    onCommit(Math.min(high, Math.max(low, next)))
+  }
   return (
     <input
-      type="range"
-      min={min}
-      max={max}
-      step={step ?? 1}
-      value={value}
-      onChange={(event) => onChange(Number(event.target.value))}
-      className="w-full accent-[var(--accent)]"
+      aria-label={label}
+      inputMode="decimal"
+      step={step}
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') event.currentTarget.blur()
+      }}
+      className={control}
     />
+  )
+}
+
+export function CheckRow({
+  checked,
+  onChange,
+  children,
+}: {
+  checked: boolean
+  onChange: (checked: boolean) => void
+  children: ReactNode
+}) {
+  return (
+    <label className="flex min-h-11 items-center gap-3 text-sm font-medium">
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <span>{children}</span>
+    </label>
   )
 }
 
@@ -107,12 +213,14 @@ export function Modal({
   wide,
   onClose,
   children,
+  footer,
 }: {
   title: string
   closeLabel: string
   wide?: boolean
   onClose: () => void
   children: ReactNode
+  footer?: ReactNode
 }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -142,6 +250,7 @@ export function Modal({
           </IconButton>
         </header>
         <div className="min-h-0 flex-1 overflow-auto">{children}</div>
+        {footer}
       </div>
     </div>
   )

@@ -114,16 +114,39 @@ export function matchingPreset(widthMm: number, heightMm: number): Preset | unde
   return PRESETS.find((preset) => preset.widthMm === widthMm && preset.heightMm === heightMm)
 }
 
+const fileFont = (id: string, label: string, generic: 'sans-serif' | 'serif' | 'monospace') => ({
+  id,
+  label,
+  family: `"${label}", ${generic}`,
+  system: false as const,
+})
+
 export const FONTS = [
-  { id: 'plex-mono', label: 'IBM Plex Mono', family: '"IBM Plex Mono", ui-monospace, monospace' },
-  { id: 'jetbrains-mono', label: 'JetBrains Mono', family: '"JetBrains Mono", ui-monospace, monospace' },
-  { id: 'arial', label: 'Arial', family: 'Arial, Helvetica, sans-serif' },
-  { id: 'system', label: 'System', family: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif' },
-  { id: 'impact', label: 'Impact', family: 'Impact, Haettenschweiler, sans-serif' },
-  { id: 'verdana', label: 'Verdana', family: 'Verdana, Geneva, sans-serif' },
-  { id: 'tahoma', label: 'Tahoma', family: 'Tahoma, Geneva, sans-serif' },
-  { id: 'georgia', label: 'Georgia', family: 'Georgia, "Times New Roman", serif' },
-  { id: 'mono', label: 'Mono', family: '"Courier New", Courier, monospace' },
+  fileFont('golos', 'Golos Text', 'sans-serif'),
+  fileFont('roboto', 'Roboto', 'sans-serif'),
+  fileFont('roboto-condensed', 'Roboto Condensed', 'sans-serif'),
+  fileFont('open-sans', 'Open Sans', 'sans-serif'),
+  fileFont('pt-sans', 'PT Sans', 'sans-serif'),
+  fileFont('pt-serif', 'PT Serif', 'serif'),
+  fileFont('montserrat', 'Montserrat', 'sans-serif'),
+  fileFont('inter', 'Inter', 'sans-serif'),
+  fileFont('rubik', 'Rubik', 'sans-serif'),
+  fileFont('oswald', 'Oswald', 'sans-serif'),
+  fileFont('nunito', 'Nunito', 'sans-serif'),
+  fileFont('manrope', 'Manrope', 'sans-serif'),
+  fileFont('plex-sans', 'IBM Plex Sans', 'sans-serif'),
+  fileFont('unbounded', 'Unbounded', 'sans-serif'),
+  fileFont('exo-2', 'Exo 2', 'sans-serif'),
+  fileFont('noto-sans', 'Noto Sans', 'sans-serif'),
+  fileFont('noto-serif', 'Noto Serif', 'serif'),
+  fileFont('fira-sans', 'Fira Sans', 'sans-serif'),
+  fileFont('plex-mono', 'IBM Plex Mono', 'monospace'),
+  fileFont('jetbrains-mono', 'JetBrains Mono', 'monospace'),
+  { id: 'arial', label: 'Arial', family: 'Arial, Helvetica, sans-serif', system: true as const },
+  { id: 'verdana', label: 'Verdana', family: 'Verdana, Geneva, sans-serif', system: true as const },
+  { id: 'tahoma', label: 'Tahoma', family: 'Tahoma, Geneva, sans-serif', system: true as const },
+  { id: 'georgia', label: 'Georgia', family: 'Georgia, "Times New Roman", serif', system: true as const },
+  { id: 'mono', label: 'Courier', family: '"Courier New", Courier, monospace', system: true as const },
 ]
 
 export const DATE_FORMATS = ['DD.MM.YYYY', 'DD.MM.YYYY HH:mm', 'YYYY-MM-DD', 'HH:mm', 'DD.MM.YY']

@@ -8,6 +8,7 @@ import {
 } from '@mmote/niimbluelib'
 import type { AlignMode, PrintDirection, PrinterSnapshot, RfidView } from '../types'
 import { emptyRfid } from '../types'
+import { browserSupport, connectBlock, connectFailureCode } from '../lib/browser'
 import { formatPacketLine, rfidFromClient } from '../lib/diag'
 import { describeEncoded, padCanvas } from '../lib/encode'
 import { resolvePrintTask } from '../lib/presets'
@@ -103,7 +104,18 @@ export class PrinterController {
 
   async connect(transport: 'bluetooth' | 'serial') {
     await this.disconnect()
-    const client = instantiateClient(transport)
+    const blocked = connectBlock(transport, browserSupport())
+    if (blocked) {
+      this.patch({ status: 'error', transport: null, error: blocked })
+      throw new Error(blocked)
+    }
+    let client: NiimbotAbstractClient
+    try {
+      client = instantiateClient(transport)
+    } catch (error) {
+      this.patch({ status: 'error', transport: null, error: connectFailureCode(error, transport) })
+      throw error
+    }
     this.client = client
     this.packetLines = []
     this.patch({ status: 'connecting', transport, error: '', progress: 0, progressLabel: '' })
@@ -122,10 +134,10 @@ export class PrinterController {
       })
     })
     client.on('disconnect', () => {
-      if (this.client === client) {
-        this.client = null
-        this.patch(this.parked(this.snapshot.error))
-      }
+      if (this.client !== client) return
+      const dropped = this.snapshot.status === 'connected' || this.snapshot.status === 'connecting' || this.snapshot.printing
+      this.client = null
+      this.patch(this.parked(dropped ? 'linkLost' : this.snapshot.error, dropped ? 'error' : 'idle'))
     })
     client.on('rfidinfofetched', () => {
       this.patch({ rfid: this.readRfid(client) })
@@ -164,20 +176,19 @@ export class PrinterController {
       this.client = null
       client.removeAllListeners()
       void client.disconnect().catch(() => undefined)
-      const cancelled =
-        error instanceof DOMException && (error.name === 'NotFoundError' || error.name === 'AbortError')
       this.patch({
         status: 'error',
         transport: null,
-        error: cancelled ? 'cancelled' : error instanceof Error ? error.message : String(error),
+        error: connectFailureCode(error, transport),
       })
       throw error
     }
   }
 
-  private parked(error = ''): PrinterSnapshot {
+  private parked(error = '', status: PrinterSnapshot['status'] = 'idle'): PrinterSnapshot {
     return {
       ...initial(),
+      status,
       error,
       deviceName: this.snapshot.deviceName,
       model: this.snapshot.model,

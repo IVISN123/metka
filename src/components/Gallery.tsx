@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { translate } from '../i18n'
 import { BUILTINS, buildBuiltin } from '../engine/builtins'
 import { engine } from '../engine/editor'
 import { parseImport, serializeTemplates } from '../lib/bundle'
+import { importErrorKey, storageErrorCode } from '../lib/errors'
 import { thumbnailOf } from '../lib/render'
 import { deleteDesign, deleteTemplate, listDesigns, listTemplates, saveDesign, saveTemplate } from '../lib/storage'
-import type { DesignRecord, TemplateRecord } from '../types'
-import { downloadText, slug, uid, uniqueName } from '../lib/units'
+import type { DesignRecord, Lang, TemplateRecord } from '../types'
+import { downloadText, localDateStamp, slug, uid, uniqueName } from '../lib/units'
 import { toast } from '../toast'
 import { useI18n } from './state'
 import { useEngine } from './Stage'
@@ -40,7 +42,7 @@ export function Gallery({
   }
 
   useEffect(() => {
-    void refresh().catch((error: unknown) => toast(error instanceof Error ? error.message : String(error)))
+    void refresh().catch((error: unknown) => toast(translate(pageLang(), storageErrorCode(error) === 'quota' ? 'quota' : 'storageFail')))
     let cancel = false
     void (async () => {
       const next: Record<string, string> = {}
@@ -88,7 +90,7 @@ export function Gallery({
       setCurrent('templates')
       toast(t('savedTemplate', { name }))
     } catch (error) {
-      toast(error instanceof Error ? error.message : String(error))
+      toast(t(storageErrorCode(error) === 'quota' ? 'quota' : 'storageFail'))
     } finally {
       setBusy(false)
     }
@@ -114,8 +116,8 @@ export function Gallery({
       await refresh()
       setCurrent('templates')
       toast(t('imported', { n: payload.items.length }))
-    } catch {
-      toast(t('importFail'))
+    } catch (error) {
+      toast(t(importErrorKey(error)))
     }
   }
 
@@ -124,7 +126,7 @@ export function Gallery({
       toast(t('exportEmpty'))
       return
     }
-    downloadText(`metka-templates-${new Date().toISOString().slice(0, 10)}.json`, serializeTemplates(templates))
+    downloadText(`metka-templates-${localDateStamp()}.json`, serializeTemplates(templates))
   }
 
   return (
@@ -188,10 +190,13 @@ export function Gallery({
                     meta={t('presetCanvas', { w: item.doc.widthMm, h: item.doc.heightMm })}
                     thumb={item.thumbnail}
                     onOpen={() => {
-                      void engine.loadDocument(structuredClone(item.doc), null, true).then(() => {
-                        toast(t('loaded', { name: item.name }))
-                        onClose()
-                      })
+                      void engine.loadDocument(structuredClone(item.doc), null, true).then(
+                        () => {
+                          toast(t('loaded', { name: item.name }))
+                          onClose()
+                        },
+                        (error: unknown) => toast(t(importErrorKey(error))),
+                      )
                     }}
                     onRename={(name) => {
                       void saveTemplate({ ...item, name, updatedAt: Date.now(), doc: { ...item.doc, name } }).then(refresh)
@@ -208,7 +213,7 @@ export function Gallery({
                       }).then(async () => {
                         await refresh()
                         toast(t('savedTemplate', { name }))
-                      })
+                      }, (error: unknown) => toast(t(storageErrorCode(error) === 'quota' ? 'quota' : 'storageFail')))
                     }}
                     onExport={() => downloadText(`${slug(item.name)}.json`, serializeTemplates([item]))}
                     onDelete={() => setPendingDelete(item.id)}
@@ -258,7 +263,7 @@ export function Gallery({
                         })
                         await refresh()
                         toast(t('savedTemplate', { name }))
-                      })()
+                      })().catch((error: unknown) => toast(t(storageErrorCode(error) === 'quota' ? 'quota' : 'storageFail')))
                     }}
                   />
                 ))}
@@ -278,10 +283,13 @@ export function Gallery({
                   meta={t('presetCanvas', { w: item.doc.widthMm, h: item.doc.heightMm })}
                   thumb={item.thumbnail}
                   onOpen={() => {
-                    void engine.loadDocument(structuredClone(item.doc), item.id, false).then(() => {
-                      toast(t('loaded', { name: item.name }))
-                      onClose()
-                    })
+                    void engine.loadDocument(structuredClone(item.doc), item.id, false).then(
+                      () => {
+                        toast(t('loaded', { name: item.name }))
+                        onClose()
+                      },
+                      (error: unknown) => toast(t(importErrorKey(error))),
+                    )
                   }}
                   onRename={(name) => {
                     void saveDesign({ ...item, name, updatedAt: Date.now(), doc: { ...item.doc, name } }).then(refresh)
@@ -317,6 +325,10 @@ export function Gallery({
       </div>
     </Modal>
   )
+}
+
+function pageLang(): Lang {
+  return document.documentElement.lang === 'en' ? 'en' : 'ru'
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
