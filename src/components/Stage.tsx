@@ -5,6 +5,7 @@ import { engine } from '../engine/editor'
 import { modelLabel } from '../lib/units'
 import { toast } from '../toast'
 import { useI18n } from './state'
+import { GridMenu } from './GridMenu'
 import { Button, IconButton } from './ui'
 
 export function useEngine() {
@@ -81,6 +82,7 @@ export function Stage() {
           <IconButton label={t('fit')} onClick={() => engine.fit()}>
             <Maximize2 size={18} />
           </IconButton>
+          <GridMenu />
         </div>
         <p className="mb-2 max-w-[42%] truncate rounded-full bg-[var(--card)] px-2.5 py-1 text-[11px] font-medium text-[var(--muted)]">
           {t('statusShort', { w: state.widthMm, h: state.heightMm, model: modelLabel(state.model) })}

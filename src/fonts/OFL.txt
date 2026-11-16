@@ -3,4 +3,6 @@ The license text is at https://openfontlicense.org and applies to:
 Roboto, Open Sans, PT Sans, PT Serif, Montserrat, Inter, Rubik, Oswald,
 Roboto Condensed, Nunito, Manrope, IBM Plex Sans, IBM Plex Mono, Golos Text,
 Unbounded, Exo 2, Noto Sans, Noto Serif, Fira Sans, JetBrains Mono.
+OpenGOST type A and OpenGOST type B are by Levon Melikyan, reserved names
+'OpenGOST type A' and 'OpenGOST type B', SIL OFL 1.1 (see OFL-OpenGost.txt).
 They are stored in this directory and are not loaded from a network at runtime.

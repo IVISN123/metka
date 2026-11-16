@@ -30,6 +30,7 @@ import { BatchDialog } from './BatchDialog'
 import { FontBar } from './FontBar'
 import { Gallery } from './Gallery'
 import { Inspector, LayerList, ToolPanel } from './Panels'
+import { NewLabelDialog } from './NewLabelDialog'
 import { PrintDialog, type BatchJob } from './PrintDialog'
 import { Stage, useEngine } from './Stage'
 import { PinLockItem } from './PinGate'
@@ -52,6 +53,7 @@ export function Shell() {
   const [batch, setBatch] = useState<BatchJob>(null)
   const [help, setHelp] = useState(false)
   const [reading, setReading] = useState(false)
+  const [newOpen, setNewOpen] = useState(false)
   const [bannerOff, setBannerOff] = useState(() => {
     try {
       return sessionStorage.getItem('metka.banner') === '1'
@@ -381,12 +383,11 @@ export function Shell() {
             ))}
             <MenuItem
               onClick={() => {
-                if (state.dirty && !window.confirm(t('confirmNew'))) return
-                void engine.useBuiltin('blank')
+                setNewOpen(true)
                 setMenu(null)
               }}
             >
-              {t('newLabel')}
+              {t('newLabelTitle')}
             </MenuItem>
             <PinLockItem label={t('pinLock')} />
           </div>
@@ -604,6 +605,7 @@ export function Shell() {
       {gallery && <Gallery tab={gallery.tab} compose={gallery.compose} onClose={() => setGallery(null)} />}
       {printOpen && <PrintDialog batch={batch} onClose={() => setPrintOpen(false)} onClearBatch={() => setBatch(null)} />}
       {help && <ShortcutDialog mod={mod} onClose={() => setHelp(false)} />}
+      {newOpen && <NewLabelDialog onClose={() => setNewOpen(false)} />}
       {batchOpen && (
         <BatchDialog
           onClose={() => setBatchOpen(false)}
